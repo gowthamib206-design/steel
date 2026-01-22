@@ -1,14 +1,67 @@
-import tkinter as tk
-from tkinter import ttk
-import serial, serial.tools.list_ports
+"""
+Wireless Sensor Data Logger Application
+Handles serial communication with wireless sensors and displays temperature/RTD data via GUI
+"""
 
-ser = None
-rec = 0
-escape =0
-packet =[]
-label =0
-curr=1
-rtd_values= [ 18.4932,
+import tkinter as tk
+from tkinter import ttk, messagebox
+import serial
+import serial.tools.list_ports
+from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+import logging
+import struct
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+
+class SensorErrorType(Enum):
+    """Enumeration for sensor error types"""
+    INVALID_PACKET_LENGTH = "Invalid packet length"
+    INVALID_PORT = "Invalid port"
+    PORT_NOT_OPEN = "Port not open"
+    INVALID_SENSOR_VALUE = "Invalid sensor value"
+    NO_PORTS_AVAILABLE = "No ports available"
+    INVALID_DATA = "Invalid data received"
+    DEVICE_NOT_CONNECTED = "Device not connected"
+
+
+@dataclass
+class SensorData:
+    """Data class for sensor readings"""
+    temperature: float
+    device_id: str
+    rtd_resistance: float
+    rtd_temperature: int
+    thermocouple: float
+    battery_voltage: float
+    raw_packet: List[int]
+
+    def is_valid(self) -> bool:
+        """Validate sensor data"""
+        try:
+            if not isinstance(self.temperature, (int, float)):
+                return False
+            if not isinstance(self.battery_voltage, (int, float)):
+                return False
+            if self.battery_voltage < 0 or self.battery_voltage > 10:
+                return False
+            if not isinstance(self.device_id, str):
+                return False
+            if len(self.raw_packet) != 18:
+                return False
+            return True
+        except (TypeError, AttributeError):
+            return False
+
+
+class RTDTemperatureTable:
+    """RTD resistance to temperature conversion table"""
+    
+    rtd_values = [ 18.4932,
               18.9258,19.3580,19.7899,20.2215,20.6526,21.0834,21.5139,21.9439,22.3737,22.8031, 
               23.2321,23.6608,24.0891,24.5171,24.9447,25.3720,25.7990,26.2257,26.6520,27.0779,
               27.5036,27.9289,28.3539,28.7786,29.2029,29.6270,30.0507,30.4741,30.8972,31.3200,
@@ -117,9 +170,9 @@ rtd_values= [ 18.4932,
               381.4450,381.7406,382.0361,382.3314,382.6267,382.9218,383.2168,383.5117,383.8065,384.1011,
               384.3957,384.6901,384.9844,385.2786,385.5727,385.8667,386.1605,386.4543,386.7479,387.0414,   
               387.3348,387.6280,387.9212,388.2142,388.5072,388.8000,389.0926,389.3852,389.6777,389.9700,
-              390.2623] 
-
-thermos_values = [ 0.000,0.000,0.000,-0.001,-0.001,-0.001,-0.001,-0.001,-0.002,-0.002,-0.002 ,
+              390.2623]
+    
+    thermos_values = [ 0.000,0.000,0.000,-0.001,-0.001,-0.001,-0.001,-0.001,-0.002,-0.002,-0.002 ,
                   -0.002,-0.002,-0.002,-0.002,-0.002,-0.002,-0.002,-0.002,-0.003,-0.003,-0.003, 
                   -0.003,-0.003,-0.003,-0.003,-0.003,-0.002,-0.002,-0.002,-0.002,-0.002,-0.002, 
                   -0.002,-0.002,-0.002,-0.002,-0.002,-0.001,-0.001,-0.001,-0.001,-0.001,0.000 ,
@@ -154,231 +207,431 @@ thermos_values = [ 0.000,0.000,0.000,-0.001,-0.001,-0.001,-0.001,-0.001,-0.002,-
                    0.669,0.673,0.677,0.680,0.684,0.688,0.692,0.696,0.700,0.703,0.707,
                    0.707,0.711,0.715,0.719,0.723,0.727,0.731,0.735,0.738,0.742,0.746,
                    0.746,0.750,0.754,0.758,0.762,0.766,0.770,0.774,0.778,0.782,0.787,
-]
-
-temperatures = list(range(-200, -200 + len(rtd_values)))
-def update_gui(sensor_value):
-   for i in range(len(rtd_values)):
-    if rtd_values[i] > sensor_value:
-      return i
-   return -1
-
-def available_ports():
-    ports = [f"{p.device} - {p.description}" for p in serial.tools.list_ports.comports()]
-    combo['values'] = ports
-    if ports:
-        combo.current(0)
-
-def open_port():
-    global ser, rec
-    rec = 0
-
-    sel = combo.get()
-    if not sel:
-        status_label.config(text="No port open")
-        return
-
-    try:
-        parts = sel.split(" - ")
-        port = parts[0] if parts else None
-
-        if not port:
-            status_label.config(text="Invalid port selection")
-            return
-        ser = serial.Serial(port, 115200, timeout=1)
-        status_label.config(text=f"Opened {sel}")
-        btn_open.config(state="disabled")
-        btn_refresh.config(state="disabled")
-        btn_close.config(state="normal")
-
-        root.after(1, read_data)
-    except Exception as e:
-     status_label.config(text=f"Error opening {sel}: {e}")
-
-def close_port():
-    global ser
-    if ser and ser.is_open:
-        ser.close()
-        status_label.config(text="Port closed")
-        btn_close.config(state="disabled")
-        btn_refresh.config(state="normal")
-        btn_open.config(state="normal")
-    else:
-        status_label.config (tk.END, "No port open")
-        btn_refresh.config(state="normal")
-        btn_open.config(state="normal")
-        btn_close.config(state="disabled")
-
-def process_packet(packet):
-    if len(packet) != 18:
-       return                           
-    #temp   = int.from_bytes(packet[1:5], "big")   
-    temp=packet[4] 
-    temp=(temp<<8) | packet[3] 
-    temp=(temp<<8) | packet[2] 
-    temp=(temp<<8) | packet[1] 
-    temp=temp/10000.0
-    pktype=[]
-    seq=[] 
+    ]
     
-    #magic = str(int.from_bytes(bytes(packet[7:10]), "big"))
-    #magic = int.from_bytes(bytes(packet[7:10]), "big")
-    #magic=packet[7] 
-    #magic=(magic<<8) | packet[8] 
-    #magic=(magic<<8) | packet[9] 
-    #magic=(magic<<8) | packet[10] 
-    device_id = f"{packet[7]} {packet[8]} {packet[9]} {packet[10]}"
-    print("Device_id raw", device_id)
+    temperatures = list(range(-200, -200 + len(rtd_values)))
+
+    @classmethod
+    def get_temperature_from_resistance(cls, rtd_resistance: float) -> int:
+        """Convert RTD resistance value to temperature"""
+        if not isinstance(rtd_resistance, (int, float)):
+            logger.error(f"Invalid RTD resistance type: {type(rtd_resistance)}")
+            raise ValueError("RTD resistance must be a number")
+        
+        if rtd_resistance < 0:
+            logger.error(f"Negative RTD resistance: {rtd_resistance}")
+            raise ValueError("RTD resistance cannot be negative")
+        
+        if not cls.rtd_values:
+            logger.error("RTD values table is empty")
+            raise ValueError("RTD values table not initialized")
+        
+        try:
+            index = min(range(len(cls.rtd_values)), 
+                       key=lambda i: abs(cls.rtd_values[i] - rtd_resistance))
+            nearest_temp = index - 200
+            logger.info(f"RTD resistance {rtd_resistance} -> temperature {nearest_temp}")
+            return nearest_temp
+        except Exception as e:
+            logger.error(f"Error converting RTD resistance to temperature: {e}")
+            raise ValueError(f"Failed to convert RTD resistance: {e}")
+
+
+class SerialPortManager:
+    """Manages serial port operations"""
     
-    #rtd    = int.from_bytes(packet[11:13],"big") 
-    rtd=packet[12]
-    rtd=(rtd<<8) | packet[11]
-    rtd_resistance = (rtd * 400) / (2**15)
-    print("Calculated RTD Resistance:", rtd_resistance)
-    #for i in range(len(rtd_values)):
-      # print(i , rtd_values[i] , rtd_resistance)
-       #if rtd_values[i] >  rtd_resistance:
-        # rtd_value.config(text=str(i-200))
+    def __init__(self):
+        self.ser: Optional[serial.Serial] = None
+        self.is_open = False
     
-    #rtd_temp=update_gui(rtd_resistance)
-    index =min(range(len(rtd_values)), key=lambda i: abs(rtd_values[i] - rtd_resistance))
-    nearest_value = index-200
-    print(f"Nearest RTD index: {index}, table value={nearest_value}")
-   
-    #thermo = int.from_bytes(packet[13:15], "big")
-    thermo=packet[14]
-    thermo=(thermo<<8) | packet[13] 
-    #thermo_couple = (thermo* 1.2)  / (32 * 2**15)
-
-    battery_voltage = ((packet[16] << 8) | packet[15]) / 1000.0
-   
-    print("Packet:", packet)
-    print(f"temp={temp}, pktype={pktype}, seq={seq}, device_id={device_id}, "
-          f"rtd={rtd}, thermo={thermo}, battery_voltage={battery_voltage}")
-
-    temp_value.config(text=str(temp))
-    device_id_value.config(text=str(device_id))
-    #rtd_value.config(text=f"{rtd_resistance:.3f} ohms")
-    rtd_value.config(text=str(nearest_value))
-    thermo_value.config(text=str(thermo))
-    battery_voltage_value.config(text=f"{battery_voltage} V")
-
-    for i, b in enumerate(packet):
-        print(f"Byte {i}: {b}")
-
-def process_bytes(data):
-    global rec, escape, packet
-    print("Got byte:", data)
-    if escape == 0:
-      if data == b"\b":                      
-       escape = 1  
-      else:
-        if data == b"\r": 
-          packet = [] 
-        packet.append(data[0])
-        if len(packet) == 1 and packet[0] != ord("\r"):
-          return
-        if len(packet) > 0 and packet[-1] == ord("\n"):
-          if len(packet) == 18:
-              process_packet(packet)
-          packet = []
-          
-    else:
-      packet.append(data[0])
-      escape=0
-
-def read_data():
-    global ser
-    if ser and ser.is_open:
-        data = ser.read(1)     
+    def get_available_ports(self) -> List[str]:
+        """Get list of available serial ports"""
+        try:
+            ports = [f"{p.device} - {p.description}" for p in serial.tools.list_ports.comports()]
+            if not ports:
+                logger.warning("No serial ports available")
+                return []
+            logger.info(f"Found {len(ports)} available ports")
+            return ports
+        except Exception as e:
+            logger.error(f"Error getting available ports: {e}")
+            return []
     
-        if data:
-           process_bytes(data)
+    def open_port(self, port_str: str, baudrate: int = 115200) -> Tuple[bool, str]:
+        """Open serial port"""
+        if not port_str:
+            error_msg = "Port string is empty"
+            logger.error(error_msg)
+            return False, error_msg
+        
+        try:
+            parts = port_str.split(" - ")
+            port = parts[0].strip() if parts else None
+            
+            if not port:
+                error_msg = "Invalid port format"
+                logger.error(error_msg)
+                return False, error_msg
+            
+            self.ser = serial.Serial(port, baudrate, timeout=1)
+            self.is_open = True
+            success_msg = f"Successfully opened {port}"
+            logger.info(success_msg)
+            return True, success_msg
+        
+        except serial.SerialException as e:
+            error_msg = f"Serial error: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error opening port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def close_port(self) -> Tuple[bool, str]:
+        """Close serial port"""
+        try:
+            if self.ser and self.is_open:
+                self.ser.close()
+                self.is_open = False
+                success_msg = "Port closed successfully"
+                logger.info(success_msg)
+                return True, success_msg
+            else:
+                error_msg = "Port is not open"
+                logger.warning(error_msg)
+                return False, error_msg
+        except Exception as e:
+            error_msg = f"Error closing port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def read_byte(self) -> Optional[bytes]:
+        """Read single byte from serial port"""
+        try:
+            if self.ser and self.is_open:
+                data = self.ser.read(1)
+                return data if data else None
+            return None
+        except serial.SerialException as e:
+            logger.error(f"Serial read error: {e}")
+            self.is_open = False
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error reading data: {e}")
+            return None
 
+
+class PacketProcessor:
+    """Processes serial packets from sensor"""
+    
+    PACKET_LENGTH = 18
+    ESCAPE_BYTE = b"\b"
+    FRAME_END = b"\n"
+    FRAME_START = b"\r"
+    
+    def __init__(self):
+        self.escape = False
+        self.packet: List[int] = []
+    
+    def process_byte(self, data: bytes) -> Optional[List[int]]:
+        """Process incoming byte and return complete packet if available"""
+        if not data or len(data) != 1:
+            logger.warning(f"Invalid data received: {data}")
+            return None
+        
+        byte_val = data[0]
+        
+        if not self.escape:
+            if data == self.ESCAPE_BYTE:
+                self.escape = True
+                return None
+            
+            if data == self.FRAME_START:
+                self.packet = []
+                return None
+            
+            if data == self.FRAME_END:
+                if len(self.packet) == self.PACKET_LENGTH:
+                    complete_packet = self.packet.copy()
+                    self.packet = []
+                    return complete_packet
+                else:
+                    logger.warning(f"Incomplete packet received: {len(self.packet)} bytes")
+                    self.packet = []
+                    return None
+            
+            self.packet.append(byte_val)
         else:
-            status_label.config(text="Waiting for full 16 bytes...")
-    else:
-        status_label.config(text="Port not open yet...")
-
-    root.after(1, read_data)
-
-root = tk.Tk()
-root.title("USB Logger")
-root.geometry("1200x500")
-
-container = tk.Frame(root)
-container.pack(fill="both",expand=True, pady=15, padx=15)
-
-left_frame = tk.Frame(container)
-left_frame.pack(side=tk.LEFT,fill="y",anchor="n",expand=True, padx=10, pady=10)
-
-device_id_label = tk.Label(left_frame, text="Device ID:", font=("Arial", 14), anchor="w", fg="#333")
-device_id_label.pack(side="top",pady=(10,5), anchor="w")
-
-device_id_value = tk.Label(left_frame, text="--", font=("Arial", 32, "bold"), anchor="w", fg="#0066cc")
-device_id_value.pack(side="top",pady=(0,15), anchor="w")
-
-battery_voltage_label = tk.Label(left_frame, text="Battery Voltage:", font=("Arial", 14), anchor="w", fg="#333")
-battery_voltage_label.pack(side="top", pady=(10,5), anchor="w")
-
-battery_voltage_value = tk.Label(left_frame, text="--", font=("Arial", 32, "bold"), anchor="w", fg="#0066cc")
-battery_voltage_value.pack(side="top", pady=(0,15), anchor="w")
+            self.packet.append(byte_val)
+            self.escape = False
+        
+        return None
+    
+    def reset(self):
+        """Reset packet parser"""
+        self.packet = []
+        self.escape = False
 
 
-bottom_frame = tk.Frame(left_frame)
-bottom_frame.pack(side="bottom", fill="x", pady=15)
+class SensorDataParser:
+    """Parses packet data to extract sensor values"""
+    
+    @staticmethod
+    def parse_packet(packet: List[int]) -> Optional[SensorData]:
+        """Parse packet and extract sensor data"""
+        if not packet or len(packet) != 18:
+            logger.error(f"Invalid packet length: {len(packet) if packet else 0}")
+            raise ValueError(SensorErrorType.INVALID_PACKET_LENGTH.value)
+        
+        try:
+            # Extract temperature (bytes 1-4)
+            temp = packet[4]
+            temp = (temp << 8) | packet[3]
+            temp = (temp << 8) | packet[2]
+            temp = (temp << 8) | packet[1]
+            temp = temp / 10000.0
+            
+            if temp < -100 or temp > 100:
+                logger.warning(f"Temperature out of reasonable range: {temp}")
+            
+            # Extract device ID (bytes 7-10)
+            device_id = f"{packet[7]} {packet[8]} {packet[9]} {packet[10]}"
+            
+            # Extract RTD (bytes 11-12)
+            rtd = packet[12]
+            rtd = (rtd << 8) | packet[11]
+            rtd_resistance = (rtd * 400) / (2**15)
+            
+            if rtd_resistance < 0:
+                logger.error(f"Negative RTD resistance: {rtd_resistance}")
+                raise ValueError("RTD resistance cannot be negative")
+            
+            # Convert RTD resistance to temperature
+            try:
+                rtd_temperature = RTDTemperatureTable.get_temperature_from_resistance(rtd_resistance)
+            except ValueError as e:
+                logger.error(f"Failed to convert RTD: {e}")
+                rtd_temperature = 0
+            
+            # Extract thermocouple (bytes 13-14)
+            thermo = packet[14]
+            thermo = (thermo << 8) | packet[13]
+            
+            # Extract battery voltage (bytes 15-16)
+            battery_voltage = ((packet[16] << 8) | packet[15]) / 1000.0
+            
+            if battery_voltage < 0 or battery_voltage > 10:
+                logger.warning(f"Battery voltage out of range: {battery_voltage}")
+            
+            sensor_data = SensorData(
+                temperature=temp,
+                device_id=device_id,
+                rtd_resistance=rtd_resistance,
+                rtd_temperature=rtd_temperature,
+                thermocouple=thermo,
+                battery_voltage=battery_voltage,
+                raw_packet=packet
+            )
+            
+            if not sensor_data.is_valid():
+                logger.error("Parsed sensor data validation failed")
+                raise ValueError("Invalid sensor data")
+            
+            logger.info(f"Successfully parsed packet: temp={temp}, rtd={rtd_resistance:.3f}, battery={battery_voltage}V")
+            return sensor_data
+        
+        except (IndexError, struct.error, ValueError) as e:
+            logger.error(f"Error parsing packet: {e}")
+            raise ValueError(f"Packet parsing error: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error parsing packet: {e}")
+            raise ValueError(f"Unexpected parsing error: {e}")
 
-ports_label = tk.Label(bottom_frame, text="Available Ports:", font=("Arial", 11), fg="#333")
-ports_label.pack(anchor="w", pady=(0,5))
 
-combo = ttk.Combobox(bottom_frame, width=40, state="readonly", font=("Arial", 10))
-combo.pack(pady=8, anchor="w")
+class SensorGUI:
+    """GUI for wireless sensor data logger"""
+    
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("USB Logger - Wireless Sensor Data")
+        self.root.geometry("1200x500")
+        
+        self.port_manager = SerialPortManager()
+        self.packet_processor = PacketProcessor()
+        self.data_parser = SensorDataParser()
+        
+        self.is_reading = False
+        
+        self._create_widgets()
+        self._update_ports()
+    
+    def _create_widgets(self):
+        """Create GUI widgets"""
+        container = tk.Frame(self.root)
+        container.pack(fill="both", expand=True, pady=15, padx=15)
+        
+        # Left frame - Controls
+        left_frame = tk.Frame(container)
+        left_frame.pack(side=tk.LEFT, fill="y", anchor="n", expand=True, padx=10, pady=10)
+        
+        # Device ID
+        device_id_label = tk.Label(left_frame, text="Device ID:", font=("Arial", 14), anchor="w", fg="#333")
+        device_id_label.pack(side="top", pady=(10, 5), anchor="w")
+        
+        self.device_id_value = tk.Label(left_frame, text="--", font=("Arial", 32, "bold"), anchor="w", fg="#0066cc")
+        self.device_id_value.pack(side="top", pady=(0, 15), anchor="w")
+        
+        # Battery Voltage
+        battery_voltage_label = tk.Label(left_frame, text="Battery Voltage:", font=("Arial", 14), anchor="w", fg="#333")
+        battery_voltage_label.pack(side="top", pady=(10, 5), anchor="w")
+        
+        self.battery_voltage_value = tk.Label(left_frame, text="--", font=("Arial", 32, "bold"), anchor="w", fg="#0066cc")
+        self.battery_voltage_value.pack(side="top", pady=(0, 15), anchor="w")
+        
+        # Bottom controls
+        bottom_frame = tk.Frame(left_frame)
+        bottom_frame.pack(side="bottom", fill="x", pady=15)
+        
+        ports_label = tk.Label(bottom_frame, text="Available Ports:", font=("Arial", 11), fg="#333")
+        ports_label.pack(anchor="w", pady=(0, 5))
+        
+        self.combo = ttk.Combobox(bottom_frame, width=40, state="readonly", font=("Arial", 10))
+        self.combo.pack(pady=8, anchor="w")
+        
+        btn_frame = tk.Frame(bottom_frame)
+        btn_frame.pack(pady=10)
+        
+        self.btn_refresh = tk.Button(btn_frame, text="Refresh", command=self._update_ports, 
+                                     font=("Arial", 10), width=10, bg="#e0e0e0")
+        self.btn_refresh.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_open = tk.Button(btn_frame, text="Open", command=self._open_port, 
+                                  font=("Arial", 10), width=10, bg="#90EE90")
+        self.btn_open.pack(side=tk.LEFT, padx=5)
+        
+        self.btn_close = tk.Button(btn_frame, text="Close", command=self._close_port, 
+                                   font=("Arial", 10), width=10, bg="#FFB6C1", state="disabled")
+        self.btn_close.pack(side=tk.LEFT, padx=5)
+        
+        # Right frame - Display
+        right_frame = tk.Frame(container)
+        right_frame.pack(side=tk.RIGHT, expand=True, padx=10, pady=10)
+        
+        self.status_label = tk.Label(right_frame, text="Ready", fg="#006600", font=("Arial", 9))
+        self.status_label.pack(pady=(0, 10))
+        
+        # Main temperature display
+        temp_display_frame = tk.Frame(right_frame)
+        temp_display_frame.pack(pady=20, expand=True)
+        
+        temp_label = tk.Label(temp_display_frame, text="Temperature", font=("Arial", 16), fg="#333")
+        temp_label.pack(pady=(0, 10))
+        
+        self.temp_value = tk.Label(temp_display_frame, text="--", font=("Arial", 120, "bold"), fg="#d9534f")
+        self.temp_value.pack()
+        
+        # Secondary sensors
+        sensor_frame = tk.Frame(right_frame)
+        sensor_frame.pack(pady=10, fill="x")
+        
+        rtd_label = tk.Label(sensor_frame, text="RTD (Temp):", font=("Arial", 12), anchor="e", fg="#333")
+        rtd_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
+        self.rtd_value = tk.Label(sensor_frame, text="--", font=("Arial", 28, "bold"), width=8, anchor="w", fg="#5cb85c")
+        self.rtd_value.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
+        
+        thermo_label = tk.Label(sensor_frame, text="Thermocouple:", font=("Arial", 12), anchor="e", fg="#333")
+        thermo_label.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
+        self.thermo_value = tk.Label(sensor_frame, text="--", font=("Arial", 28, "bold"), width=8, anchor="w", fg="#0275d8")
+        self.thermo_value.grid(row=1, column=1, padx=10, pady=10, sticky="ew")
+    
+    def _update_ports(self):
+        """Update available ports dropdown"""
+        ports = self.port_manager.get_available_ports()
+        if not ports:
+            self.combo['values'] = []
+            self.status_label.config(text="No ports available", fg="#cc0000")
+            messagebox.showwarning("No Ports", "No serial ports found")
+        else:
+            self.combo['values'] = ports
+            self.combo.current(0)
+            self.status_label.config(text=f"Found {len(ports)} port(s)", fg="#006600")
+    
+    def _open_port(self):
+        """Open selected serial port"""
+        sel = self.combo.get()
+        if not sel:
+            self.status_label.config(text="No port selected", fg="#cc0000")
+            messagebox.showerror("Error", "Please select a port")
+            return
+        
+        success, msg = self.port_manager.open_port(sel)
+        if success:
+            self.status_label.config(text=f"Opened: {sel}", fg="#006600")
+            self.btn_open.config(state="disabled")
+            self.btn_refresh.config(state="disabled")
+            self.btn_close.config(state="normal")
+            self.is_reading = True
+            self._read_data()
+        else:
+            self.status_label.config(text=msg, fg="#cc0000")
+            messagebox.showerror("Error", msg)
+    
+    def _close_port(self):
+        """Close serial port"""
+        success, msg = self.port_manager.close_port()
+        self.is_reading = False
+        self.status_label.config(text=msg, fg="#006600" if success else "#cc0000")
+        self.btn_close.config(state="disabled")
+        self.btn_refresh.config(state="normal")
+        self.btn_open.config(state="normal")
+        self.packet_processor.reset()
+    
+    def _read_data(self):
+        """Read data from serial port"""
+        if not self.is_reading or not self.port_manager.is_open:
+            self.status_label.config(text="Waiting for connection...", fg="#999999")
+            return
+        
+        try:
+            data = self.port_manager.read_byte()
+            if data:
+                packet = self.packet_processor.process_byte(data)
+                if packet:
+                    self._process_sensor_data(packet)
+            else:
+                self.status_label.config(text="Waiting for data...", fg="#999999")
+        except Exception as e:
+            logger.error(f"Error in read_data: {e}")
+            self.status_label.config(text=f"Error: {e}", fg="#cc0000")
+        
+        if self.is_reading:
+            self.root.after(1, self._read_data)
+    
+    def _process_sensor_data(self, packet: List[int]):
+        """Process and display sensor data"""
+        try:
+            sensor_data = self.data_parser.parse_packet(packet)
+            self.temp_value.config(text=str(sensor_data.temperature))
+            self.device_id_value.config(text=sensor_data.device_id)
+            self.rtd_value.config(text=str(sensor_data.rtd_temperature))
+            self.thermo_value.config(text=str(sensor_data.thermocouple))
+            self.battery_voltage_value.config(text=f"{sensor_data.battery_voltage:.2f} V")
+            self.status_label.config(text="Receiving data...", fg="#006600")
+        except ValueError as e:
+            logger.error(f"Data parsing error: {e}")
+            self.status_label.config(text=f"Parse error: {e}", fg="#ff9900")
+        except Exception as e:
+            logger.error(f"Unexpected error processing data: {e}")
+            self.status_label.config(text=f"Error: {e}", fg="#cc0000")
 
-btn_frame = tk.Frame(bottom_frame)
-btn_frame.pack(pady=10)
 
-btn_refresh = tk.Button(btn_frame, text="Refresh", command=available_ports, font=("Arial", 10), width=10, bg="#e0e0e0")
-btn_refresh.pack(side=tk.LEFT, padx=5)
+def main():
+    """Main application entry point"""
+    root = tk.Tk()
+    gui = SensorGUI(root)
+    root.mainloop()
 
-btn_open = tk.Button(btn_frame, text="Open", command=open_port, font=("Arial", 10), width=10, bg="#90EE90")
-btn_open.pack(side=tk.LEFT, padx=5)
 
-btn_close = tk.Button(btn_frame, text="Close", command=close_port, font=("Arial", 10), width=10, bg="#FFB6C1")
-btn_close.pack(side=tk.LEFT, padx=5)
-
-right_frame = tk.Frame(container)
-right_frame.pack(side=tk.RIGHT,expand=True, padx=10,pady=10)
-
-status_label = tk.Label(right_frame, text=" ", fg="#006600", font=("Arial", 9))
-status_label.pack(pady=(0,10))
-
-# Main temperature display
-temp_display_frame = tk.Frame(right_frame)
-temp_display_frame.pack(pady=20, expand=True)
-
-temp_label = tk.Label(temp_display_frame, text="Temperature", font=("Arial", 16), fg="#333")
-temp_label.pack(pady=(0,10))
-
-temp_value = tk.Label(temp_display_frame, text="--", font=("Arial", 120, "bold"), fg="#d9534f")
-temp_value.pack()
-
-# Secondary sensors
-sensor_frame = tk.Frame(right_frame)
-sensor_frame.pack(pady=10, fill="x")
-
-rtd_label = tk.Label(sensor_frame, text="RTD (Temp):", font=("Arial", 12), anchor="e", fg="#333")
-rtd_label.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
-rtd_value = tk.Label(sensor_frame, text="--", font=("Arial", 28, "bold"), width=8, anchor="w", fg="#5cb85c")
-rtd_value.grid(row=0, column=1, padx=10, pady=10, sticky="ew")
-
-thermo_label = tk.Label(sensor_frame, text="Thermocouple:", font=("Arial", 12), anchor="e", fg="#333")
-thermo_label.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
-thermo_value = tk.Label(sensor_frame, text="--", font=("Arial", 28, "bold"), width=8, anchor="w", fg="#0275d8")
-thermo_value.grid(row=1, column=1, padx=10, pady=10,sticky="ew")
-
-btn_refresh.config(state="normal")
-btn_open.config(state="normal")
-btn_close.config(state="normal")
-
-available_ports()
-root.mainloop()    
+if __name__ == "__main__":
+    main()    
