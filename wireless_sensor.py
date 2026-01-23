@@ -40,6 +40,7 @@ class SensorData:
     rtd_temperature: int
     thermocouple: float
     battery_voltage: float
+    rssi: int
     raw_packet: List[int]
 
     def is_valid(self) -> bool:
@@ -53,7 +54,7 @@ class SensorData:
                 return False
             if not isinstance(self.device_id, str):
                 return False
-            if len(self.raw_packet) != 18:
+            if len(self.raw_packet) != 16:
                 return False
             return True
         except (TypeError, AttributeError):
@@ -173,8 +174,7 @@ class ThermocoupleTable:
                            -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.003, -0.003, -0.003,
                            -0.003, -0.003, -0.003, -0.003, -0.003, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002,
                            -0.002, -0.002, -0.002, -0.002, -0.002, -0.001, -0.001, -0.001, -0.001, -0.001, 0.000,
-                            0.000, 0.000, 0.000, 0.000, 0.000, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002, 
-                            
+                            0.000, 0.000, 0.000, 0.000, 0.000, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002,                             
                             0.002, 0.003, 0.003, 0.003, 0.004, 0.004, 0.004, 0.005, 0.005, 0.006, 0.006,
                             0.006, 0.007, 0.007, 0.008, 0.008, 0.009, 0.009, 0.010, 0.010, 0.011, 0.011,
                             0.011, 0.012, 0.012, 0.013, 0.014, 0.014, 0.015, 0.015, 0.016, 0.017, 0.017,
@@ -184,8 +184,7 @@ class ThermocoupleTable:
                             0.043, 0.044, 0.045, 0.046, 0.047, 0.048, 0.049, 0.050, 0.051, 0.052, 0.053,
                             0.053, 0.055, 0.056, 0.057, 0.058, 0.059, 0.060, 0.062, 0.063, 0.064, 0.065,
                             0.065, 0.066, 0.068, 0.069, 0.070, 0.072, 0.073, 0.074, 0.075, 0.077, 0.078,
-                            0.078, 0.079, 0.081, 0.082, 0.083, 0.084, 0.085, 0.086, 0.087, 0.089, 0.091,
-                            
+                            0.078, 0.079, 0.081, 0.082, 0.083, 0.084, 0.085, 0.086, 0.087, 0.089, 0.091,  
                             0.092, 0.094, 0.095, 0.096, 0.098, 0.099, 0.101, 0.102, 0.104, 0.106, 0.107,
                             0.107, 0.109, 0.110, 0.112, 0.113, 0.115, 0.117, 0.118, 0.120, 0.122, 0.123,
                             0.123, 0.125, 0.127, 0.128, 0.130, 0.132, 0.134, 0.135, 0.137, 0.139, 0.141,
@@ -201,13 +200,11 @@ class ThermocoupleTable:
                             0.344, 0.347, 0.349, 0.352, 0.355, 0.358, 0.360, 0.363, 0.366, 0.369, 0.372,
                             0.372, 0.375, 0.377, 0.380, 0.383, 0.386, 0.389, 0.392, 0.395, 0.398, 0.401,
                             0.401, 0.404, 0.407, 0.410, 0.413, 0.416, 0.419, 0.422, 0.425, 0.428, 0.431,
-                            
                             0.431, 0.434, 0.437, 0.440, 0.443, 0.446, 0.449, 0.452, 0.455, 0.458, 0.462,
                             0.462, 0.465, 0.468, 0.471, 0.474, 0.478, 0.481, 0.484, 0.487, 0.490, 0.494,
                             0.494, 0.497, 0.500, 0.503, 0.507, 0.510, 0.513, 0.517, 0.520, 0.523, 0.527,
                             0.527, 0.530, 0.533, 0.537, 0.540, 0.544, 0.547, 0.550, 0.554, 0.557, 0.561,
                             0.561, 0.564, 0.568, 0.571, 0.575, 0.578, 0.582, 0.585, 0.589, 0.592, 0.596,
-
                             0.596, 0.599, 0.603, 0.607, 0.610, 0.614, 0.617, 0.621, 0.625, 0.628, 0.632,
                             0.632, 0.636, 0.639, 0.643, 0.647, 0.650, 0.654, 0.658, 0.662, 0.665, 0.669,
                             0.669, 0.673, 0.677, 0.680, 0.684, 0.688, 0.692, 0.696, 0.700, 0.703, 0.707,
@@ -217,39 +214,32 @@ class ThermocoupleTable:
                             0.828, 0.832, 0.836, 0.840, 0.844, 0.849, 0.853, 0.857, 0.861, 0.866, 0.870,
                             0.870, 0.874, 0.878, 0.883, 0.887, 0.891, 0.896, 0.900, 0.904, 0.909, 0.913,
                             0.913, 0.917, 0.922, 0.926, 0.930, 0.935, 0.939, 0.944, 0.948, 0.953, 0.957,
-           
                             0.957, 0.961, 0.966, 0.970, 0.975, 0.979, 0.984, 0.988, 0.993, 0.997, 1.002,
-
                             1.002, 1.007, 1.011, 1.016, 1.020, 1.025, 1.030, 1.034, 1.039, 1.043, 1.048,
                             1.048, 1.053, 1.057, 1.062, 1.067, 1.071, 1.076, 1.081, 1.086, 1.090, 1.095,
                             1.095, 1.100, 1.105, 1.109, 1.114, 1.119, 1.124, 1.129, 1.133, 1.138, 1.143,
                             1.143, 1.148, 1.153, 1.158, 1.163, 1.167, 1.172, 1.177, 1.182, 1.187, 1.192,
-                            1.192, 1.197, 1.202, 1.207, 1.212, 1.217, 1.222, 1.227, 1.232, 1.237, 1.242,
-                            
+                            1.192, 1.197, 1.202, 1.207, 1.212, 1.217, 1.222, 1.227, 1.232, 1.237, 1.242,   
                             1.242, 1.247, 1.252, 1.257, 1.262, 1.267, 1.272, 1.277, 1.282, 1.288, 1.293,
                             1.293, 1.298, 1.303, 1.308, 1.313, 1.318, 1.324, 1.329, 1.334, 1.339, 1.344,
                             1.344, 1.350, 1.355, 1.360, 1.365, 1.371, 1.376, 1.381, 1.387, 1.392, 1.397,
                             1.397, 1.402, 1.408, 1.413, 1.418, 1.424, 1.429, 1.435, 1.440, 1.445, 1.451,
                             1.451, 1.456, 1.462, 1.467, 1.472, 1.478, 1.483, 1.489, 1.494, 1.500, 1.505,
-
                             1.505, 1.511, 1.516, 1.522, 1.527, 1.533, 1.539, 1.544, 1.550, 1.555, 1.561,
                             1.561, 1.566, 1.572, 1.578, 1.583, 1.589, 1.595, 1.600, 1.606, 1.612, 1.617,
                             1.617, 1.623, 1.629, 1.634, 1.640, 1.646, 1.652, 1.657, 1.663, 1.669, 1.675,
                             1.675, 1.680, 1.686, 1.692, 1.698, 1.704, 1.709, 1.715, 1.721, 1.727, 1.733,
                             1.733, 1.739, 1.745, 1.750, 1.756, 1.762, 1.768, 1.774, 1.780, 1.786, 1.792,
-
                             1.792, 1.798, 1.804, 1.810, 1.816, 1.822, 1.828, 1.834, 1.840, 1.846, 1.852,
                             1.852, 1.858, 1.864, 1.870, 1.876, 1.882, 1.888, 1.894, 1.901, 1.907, 1.913,
                             1.913, 1.919, 1.925, 1.931, 1.937, 1.944, 1.950, 1.956, 1.962, 1.968, 1.975,
                             1.975, 1.981, 1.987, 1.993, 1.999, 2.006, 2.012, 2.018, 2.025, 2.031, 2.037,
                             2.037, 2.043, 2.050, 2.056, 2.062, 2.069, 2.075, 2.082, 2.088, 2.094, 2.101,
-
                             2.101, 2.107, 2.113, 2.120, 2.126, 2.133, 2.139, 2.146, 2.152, 2.158, 2.165,
                             2.165, 2.171, 2.178, 2.184, 2.191, 2.197, 2.204, 2.210, 2.217, 2.224, 2.230,
                             2.230, 2.237, 2.243, 2.250, 2.256, 2.263, 2.270, 2.276, 2.283, 2.289, 2.296,
                             2.296, 2.303, 2.309, 2.316, 2.323, 2.329, 2.336, 2.343, 2.350, 2.356, 2.363,
                             2.363, 2.370, 2.376, 2.383, 2.390, 2.397, 2.403, 2.410, 2.417, 2.424, 2.431,
-
                             2.431, 2.437, 2.444, 2.451, 2.458, 2.465, 2.472, 2.479, 2.485, 2.492, 2.499,
                             2.499, 2.506, 2.513, 2.520, 2.527, 2.534, 2.541, 2.548, 2.555, 2.562, 2.569,
                             2.569, 2.576, 2.583, 2.590, 2.597, 2.604, 2.611, 2.618, 2.625, 2.632, 2.639,
@@ -260,25 +250,21 @@ class ThermocoupleTable:
                             2.928, 2.935, 2.943, 2.950, 2.958, 2.965, 2.973, 2.980, 2.987, 2.995, 3.002,
                             3.002, 3.010, 3.017, 3.025, 3.032, 3.040, 3.047, 3.055, 3.062, 3.070, 3.078,
                             3.078, 3.085, 3.093, 3.100, 3.108, 3.116, 3.123, 3.131, 3.138, 3.146, 3.154,
-
                             3.154, 3.161, 3.169, 3.177, 3.184, 3.192, 3.200, 3.207, 3.215, 3.223, 3.230,
                             3.230, 3.238, 3.246, 3.254, 3.261, 3.269, 3.277, 3.285, 3.292, 3.300, 3.308,
                             3.308, 3.316, 3.324, 3.331, 3.339, 3.347, 3.355, 3.363, 3.371, 3.379, 3.386,
                             3.386, 3.394, 3.402, 3.410, 3.418, 3.426, 3.434, 3.442, 3.450, 3.458, 3.466,
                             3.466, 3.474, 3.482, 3.490, 3.498, 3.506, 3.514, 3.522, 3.530, 3.538, 3.546,
-
                             3.546, 3.554, 3.562, 3.570, 3.578, 3.586, 3.594, 3.602, 3.610, 3.618, 3.626,
                             3.626, 3.634, 3.643, 3.651, 3.659, 3.667, 3.675, 3.683, 3.692, 3.700, 3.708,
                             3.708, 3.716, 3.724, 3.732, 3.741, 3.749, 3.757, 3.765, 3.774, 3.782, 3.790,
                             3.790, 3.798, 3.807, 3.815, 3.823, 3.832, 3.840, 3.848, 3.857, 3.865, 3.873,
                             3.873, 3.882, 3.890, 3.898, 3.907, 3.915, 3.923, 3.932, 3.940, 3.949, 3.957,
-
                             3.957, 3.965, 3.974, 3.982, 3.991, 3.999, 4.008, 4.016, 4.024, 4.033, 4.041,
                             4.041, 4.050, 4.058, 4.067, 4.075, 4.084, 4.093, 4.101, 4.110, 4.118, 4.127,
                             4.127, 4.135, 4.144, 4.152, 4.161, 4.170, 4.178, 4.187, 4.195, 4.204, 4.213,
                             4.213, 4.221, 4.230, 4.239, 4.247, 4.256, 4.265, 4.273, 4.282, 4.291, 4.299,
                             4.299, 4.308, 4.317, 4.326, 4.334, 4.343, 4.352, 4.360, 4.369, 4.378, 4.387,
-
                             4.387, 4.396, 4.404, 4.413, 4.422, 4.431, 4.440, 4.448, 4.457, 4.466, 4.475,
                             4.475, 4.484, 4.493, 4.501, 4.510, 4.519, 4.528, 4.537, 4.546, 4.555, 4.564,
                             4.564, 4.573, 4.582, 4.591, 4.599, 4.608, 4.617, 4.626, 4.635, 4.644, 4.653,
@@ -289,97 +275,81 @@ class ThermocoupleTable:
                             5.018, 5.027, 5.037, 5.046, 5.055, 5.065, 5.074, 5.083, 5.092, 5.102, 5.111,
                             5.111, 5.120, 5.130, 5.139, 5.148, 5.158, 5.167, 5.176, 5.186, 5.195, 5.205,
                             5.205, 5.214, 5.223, 5.233, 5.242, 5.252, 5.261, 5.270, 5.280, 5.289, 5.299,
-
                             5.299, 5.308, 5.318, 5.327, 5.337, 5.346, 5.356, 5.365, 5.375, 5.384, 5.394,
                             5.394, 5.403, 5.413, 5.422, 5.432, 5.441, 5.451, 5.460, 5.470, 5.480, 5.489,
                             5.489, 5.499, 5.508, 5.518, 5.528, 5.537, 5.547, 5.556, 5.566, 5.576, 5.585,
                             5.585, 5.595, 5.605, 5.614, 5.624, 5.634, 5.643, 5.653, 5.663, 5.672, 5.682,
                             5.682, 5.692, 5.702, 5.711, 5.721, 5.731, 5.740, 5.750, 5.760, 5.770, 5.780,
-
                             5.780, 5.789, 5.799, 5.809, 5.819, 5.828, 5.838, 5.848, 5.858, 5.868, 5.878,
                             5.878, 5.887, 5.897, 5.907, 5.917, 5.927, 5.937, 5.947, 5.956, 5.966, 5.976,
                             5.976, 5.986, 5.996, 6.006, 6.016, 6.026, 6.036, 6.046, 6.055, 6.065, 6.075,
                             6.075, 6.085, 6.095, 6.105, 6.115, 6.125, 6.135, 6.145, 6.155, 6.165, 6.175,
                             6.175, 6.185, 6.195, 6.205, 6.215, 6.225, 6.235, 6.245, 6.256, 6.266, 6.276,
-
                             6.276, 6.286, 6.296, 6.306, 6.316, 6.326, 6.336, 6.346, 6.356, 6.367, 6.377,
                             6.377, 6.387, 6.397, 6.407, 6.417, 6.427, 6.438, 6.448, 6.458, 6.468, 6.478,
                             6.478, 6.488, 6.499, 6.509, 6.519, 6.529, 6.539, 6.550, 6.560, 6.570, 6.580,
                             6.580, 6.591, 6.601, 6.611, 6.621, 6.632, 6.642, 6.652, 6.663, 6.673, 6.683,
                             6.683, 6.693, 6.704, 6.714, 6.724, 6.735, 6.745, 6.755, 6.766, 6.776, 6.786,
-
                             6.786, 6.797, 6.807, 6.818, 6.828, 6.838, 6.849, 6.859, 6.869, 6.880, 6.890,
                             6.890, 6.901, 6.911, 6.922, 6.932, 6.942, 6.953, 6.963, 6.974, 6.984, 6.995,
                             6.995, 7.005, 7.016, 7.026, 7.037, 7.047, 7.058, 7.068, 7.079, 7.089, 7.100,
                             7.100, 7.110, 7.121, 7.131, 7.142, 7.152, 7.163, 7.173, 7.184, 7.194, 7.205,
                             7.205, 7.216, 7.226, 7.237, 7.247, 7.258, 7.269, 7.279, 7.290, 7.300, 7.311,
-
                             7.311, 7.322, 7.332, 7.343, 7.353, 7.364, 7.375, 7.385, 7.396, 7.407, 7.417,
                             7.417, 7.428, 7.439, 7.449, 7.460, 7.471, 7.482, 7.492, 7.503, 7.514, 7.524,
                             7.524, 7.535, 7.546, 7.557, 7.567, 7.578, 7.589, 7.600, 7.610, 7.621, 7.632,
                             7.632, 7.643, 7.653, 7.664, 7.675, 7.686, 7.697, 7.707, 7.718, 7.729, 7.740,
                             7.740, 7.751, 7.761, 7.772, 7.783, 7.794, 7.805, 7.816, 7.827, 7.837, 7.848,
-
                             7.848, 7.859, 7.870, 7.881, 7.892, 7.903, 7.914, 7.924, 7.935, 7.946, 7.957,
                             7.957, 7.968, 7.979, 7.990, 8.001, 8.012, 8.023, 8.034, 8.045, 8.056, 8.066,
                             8.066, 8.077, 8.088, 8.099, 8.110, 8.121, 8.132, 8.143, 8.154, 8.165, 8.176,
                             8.176, 8.187, 8.198, 8.209, 8.220, 8.231, 8.242, 8.253, 8.264, 8.275, 8.286,
                             8.286, 8.298, 8.309, 8.320, 8.331, 8.342, 8.353, 8.364, 8.375, 8.386, 8.397,
-
                             8.397, 8.408, 8.419, 8.430, 8.441, 8.453, 8.464, 8.475, 8.486, 8.497, 8.508, 
                             8.508, 8.519, 8.530, 8.542, 8.553, 8.564, 8.575, 8.586, 8.597, 8.608, 8.620,
                             8.620, 8.631, 8.642, 8.653, 8.664, 8.675, 8.687, 8.698, 8.709, 8.720, 8.731,
                             8.731, 8.743, 8.754, 8.765, 8.776, 8.787, 8.799, 8.810, 8.821, 8.832, 8.844,
                             8.844, 8.855, 8.866, 8.877, 8.889, 8.900, 8.911, 8.922, 8.934, 8.945, 8.956,
-
                             8.956, 8.967, 8.979, 8.990, 9.001, 9.013, 9.024, 9.035, 9.047, 9.058, 9.069,
                             9.069, 9.080, 9.092, 9.103, 9.114, 9.126, 9.137, 9.148, 9.160, 9.171, 9.182,
                             9.182, 9.194, 9.205, 9.216, 9.228, 9.239, 9.251, 9.262, 9.273, 9.285, 9.296,
                             9.296, 9.307, 9.319, 9.330, 9.342, 9.353, 9.364, 9.376, 9.387, 9.398, 9.410,
                             9.410, 9.421, 9.433, 9.444, 9.456, 9.467, 9.478, 9.490, 9.501, 9.513, 9.524,
-
                             9.524, 9.536, 9.547, 9.558, 9.570, 9.581, 9.593, 9.604, 9.616, 9.627, 9.639,
                             9.639, 9.650, 9.662, 9.673, 9.684, 9.696, 9.707, 9.719, 9.730, 9.742, 9.753,
                             9.753, 9.765, 9.776, 9.788, 9.799, 9.811, 9.822, 9.834, 9.845, 9.857, 9.868,
                             9.868, 9.880, 9.891, 9.903, 9.914, 9.926, 9.937, 9.949, 9.961, 9.972, 9.984,
                             9.984, 9.995, 10.007, 10.018, 10.030, 10.041, 10.053, 10.064, 10.076, 10.088, 10.099,
-
                             10.099, 10.111, 10.122, 10.134, 10.145, 10.157, 10.168, 10.180, 10.192, 10.203, 10.215,
                             10.215, 10.226, 10.238, 10.249, 10.261, 10.273, 10.284, 10.296, 10.307, 10.319, 10.331,
                             10.331, 10.342, 10.354, 10.365, 10.377, 10.389, 10.400, 10.412, 10.423, 10.435, 10.447,
                             10.447, 10.458, 10.470, 10.482, 10.493, 10.505, 10.516, 10.528, 10.540, 10.551, 10.563,
                             10.563, 10.575, 10.586, 10.598, 10.609, 10.621, 10.633, 10.644, 10.656, 10.668, 10.679,
-
                             10.679, 10.691, 10.703, 10.714, 10.726, 10.738, 10.749, 10.761, 10.773, 10.784, 10.796,
                             10.796, 10.808, 10.819, 10.831, 10.843, 10.854, 10.866, 10.877, 10.889, 10.901, 10.913,
                             10.913, 10.924, 10.936, 10.948, 10.959, 10.971, 10.983, 10.994, 11.006, 11.018, 11.029,
                             11.029, 11.041, 11.053, 11.064, 11.076, 11.088, 11.099, 11.111, 11.123, 11.134, 11.146,
                             11.146, 11.158, 11.169, 11.181, 11.193, 11.205, 11.216, 11.228, 11.240, 11.251, 11.263,
-
                             11.263, 11.275, 11.286, 11.298, 11.310, 11.321, 11.333, 11.345, 11.357, 11.368, 11.380,
                             11.380, 11.392, 11.403, 11.415, 11.427, 11.438, 11.450, 11.462, 11.474, 11.485, 11.497,
                             11.497, 11.509, 11.520, 11.532, 11.544, 11.555, 11.567, 11.579, 11.591, 11.602, 11.614,
                             11.614, 11.626, 11.637, 11.649, 11.661, 11.673, 11.684, 11.696, 11.708, 11.719, 11.731,
                             11.731, 11.743, 11.754, 11.766, 11.778, 11.790, 11.801, 11.813, 11.825, 11.836, 11.848,
-
                             11.848, 11.860, 11.871, 11.883, 11.895, 11.906, 11.918, 11.930, 11.941, 11.953, 11.965,
                             11.965, 11.976, 11.988, 12.000, 12.012, 12.023, 12.035, 12.047, 12.058, 12.070, 12.082,
                             12.082, 12.093, 12.105, 12.117, 12.128, 12.140, 12.152, 12.164, 12.175, 12.187, 12.199,
                             12.199, 12.210, 12.222, 12.234, 12.245, 12.257, 12.269, 12.280, 12.292, 12.304, 12.316,
                             12.316, 12.327, 12.339, 12.351, 12.362, 12.374, 12.386, 12.397, 12.409, 12.421, 12.432,
-
                             12.432, 12.444, 12.456, 12.468, 12.479, 12.491, 12.503, 12.514, 12.526, 12.538, 12.549,
                             12.549, 12.561, 12.573, 12.584, 12.596, 12.608, 12.619, 12.631, 12.643, 12.655, 12.666,
                             12.666, 12.677, 12.689, 12.701, 12.712, 12.724, 12.736, 12.747, 12.759, 12.770, 12.782,
                             12.782, 12.794, 12.805, 12.817, 12.829, 12.840, 12.852, 12.863, 12.875, 12.887, 12.898,
                             12.898, 12.910, 12.921, 12.933, 12.945, 12.956, 12.968, 12.980, 12.991, 13.003, 13.014,
-
                             13.014, 13.026, 13.037, 13.049, 13.061, 13.072, 13.084, 13.095, 13.107, 13.119, 13.130, 
                             13.130, 13.142, 13.153, 13.165, 13.176, 13.188, 13.200, 13.211, 13.223, 13.234, 13.246,
                             13.246, 13.257, 13.269, 13.280, 13.292, 13.304, 13.315, 13.327, 13.338, 13.350, 13.361,
                             13.361, 13.373, 13.384, 13.396, 13.407, 13.419, 13.430, 13.442, 13.453, 13.465, 13.476,
                             13.476, 13.488, 13.499, 13.511, 13.522, 13.534, 13.545, 13.557, 13.568, 13.580, 13.591,
-
                             13.591, 13.603, 13.614, 13.626, 13.637, 13.649, 13.660, 13.672, 13.683, 13.694, 13.706,
                             13.706, 13.717, 13.729, 13.740, 13.752, 13.763, 13.775, 13.786, 13.797, 13.809, 13.820 
              ]                  
@@ -494,7 +464,7 @@ class SerialPortManager:
 class PacketProcessor:
     """Processes serial packets from sensor"""
     
-    PACKET_LENGTH = 18
+    PACKET_LENGTH = 16
     ESCAPE_BYTE = b"\b"
     FRAME_END = b"\n"
     FRAME_START = b"\r"
@@ -548,25 +518,45 @@ class SensorDataParser:
     
     @staticmethod
     def parse_packet(packet: List[int]) -> Optional[SensorData]:
-        """Parse packet and extract sensor data"""
-        if not packet or len(packet) != 18:
+        """Parse packet and extract sensor data
+        
+        Byte layout:
+        0: Frame start marker (\r). but this is not included in the packet passed to this method
+        0-3: Temperature (4 bytes)
+        4: RSSI
+        5: Packet sequence
+        6-9: Device ID (4 bytes)
+        10-11: RTD (2 bytes)
+        12-13: Thermocouple (2 bytes)
+        14-15: Battery voltage (2 bytes)
+        """
+        if not packet or len(packet) != 16:
             logger.error(f"Invalid packet length: {len(packet) if packet else 0}")
             raise ValueError(SensorErrorType.INVALID_PACKET_LENGTH.value)
         
         try:
-            temp = packet[4]
-            temp = (temp << 8) | packet[3]
+            # Parse temperature from bytes 1-4 (4 bytes, big-endian)
+            temp = packet[3]
             temp = (temp << 8) | packet[2]
             temp = (temp << 8) | packet[1]
+            temp = (temp << 8) | packet[0]
             temp = temp / 10000.0
+            for i, b in enumerate(packet):
+             print(f"Byte {i}: {b}")
             
             if temp < -100 or temp > 100:
                 logger.warning(f"Temperature out of reasonable range: {temp}")
+
+            # Parse RSSI from byte 4
+            rssi = packet[4]
+            rssi = rssi - 128
+
+            # Parse device ID from bytes 7-9 (3 bytes)
+            device_id = f"{packet[6]:02x} {packet[7]:02x} {packet[8]:02x} {packet[9]:02x}"
             
-            device_id = f"{packet[7]} {packet[8]} {packet[9]} {packet[10]}"
-            
-            rtd = packet[12]
-            rtd = (rtd << 8) | packet[11]
+            # Parse RTD from bytes 10-11 (2 bytes, big-endian)
+            rtd = packet[11]
+            rtd = (rtd << 8) | packet[10]
             rtd_resistance = (rtd * 400) / (2**15)
             
             if rtd_resistance < 0:
@@ -579,10 +569,14 @@ class SensorDataParser:
                 logger.error(f"Failed to convert RTD: {e}")
                 rtd_temperature = 0
             
-            thermo = packet[14]
-            thermo = (thermo << 8) | packet[13]
+            # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
+            thermo_raw = packet[13]
+            thermo_raw = (thermo_raw << 8) | packet[12]
+            thermo = (thermo_raw * 1.2) / (32 * 2**15)
             
-            battery_voltage = ((packet[16] << 8) | packet[15]) / 1000.0
+            # Parse battery voltage from bytes 14-15 (2 bytes, big-endian)
+            battery_voltage = ((packet[15] << 8) | packet[14]) / 1000.0
+            
             
             if battery_voltage < 0 or battery_voltage > 10:
                 logger.warning(f"Battery voltage out of range: {battery_voltage}")
@@ -594,6 +588,7 @@ class SensorDataParser:
                 rtd_temperature=rtd_temperature,
                 thermocouple=thermo,
                 battery_voltage=battery_voltage,
+                rssi=rssi,
                 raw_packet=packet
             )
             
@@ -613,11 +608,11 @@ class SensorDataParser:
 
 
 class SensorGUI(tk.Tk):
-    """GUI for wireless sensor data logger with modern ACUCAST-style interface"""
+    """GUI for wireless sensor data logger with professional ACUCAST-style interface"""
     
     def __init__(self):
         super().__init__()
-        self.title("Wireless Sensor Data Logger - ACUCAST")
+        self.title("WIRELESS SENSOR - MOLTEN METAL CONTINUOUS TEMPERATURE SYSTEM")
         self.state('zoomed')
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
@@ -631,9 +626,11 @@ class SensorGUI(tk.Tk):
         self.rtd_temp = tk.StringVar(value="--")
         self.thermo_val = tk.StringVar(value="--")
         self.battery_val = tk.StringVar(value="--")
+        self.rssi_val = tk.StringVar(value="--")
         self.status_msg = tk.StringVar(value="Ready")
         self.is_reading = False
-        self.is_paired = tk.BooleanVar(value=False)
+        self.is_paired = tk.BooleanVar(value=False)  
+
         
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
@@ -653,72 +650,154 @@ class SensorGUI(tk.Tk):
 
 
 class DashboardFrame(tk.Frame):
-    """Main dashboard display"""
+    """Main dashboard display - Full Screen"""
     
     def __init__(self, parent, controller):
-        super().__init__(parent, bg="#ffffff")
+        super().__init__(parent, bg="#1a1a1a")
         self.controller = controller
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=1)
         
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
-        header.pack(fill="x", pady=0)
+        header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        header.grid_propagate(False)
         
-        info_frame = tk.Frame(header, bg="#e6e6e6")
-        info_frame.pack(side="left", fill="y", padx=20, pady=10)
-        tk.Label(info_frame, text="WIRELESS SENSOR LOGGER", fg="#000000", bg="#e6e6e6", font=("Arial", 18, "bold"), anchor="w").pack(fill="x")
-        conn_frame = tk.Frame(info_frame, bg="#e6e6e6")
-        conn_frame.pack(fill="x", pady=(5, 0))
-        tk.Label(conn_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
-        tk.Label(conn_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", font=("Arial", 12, "bold")).pack(side="left", padx=5)
+        # Title and device info (left side)
+        left_info = tk.Frame(header, bg="#e6e6e6")
+        left_info.pack(side="left", fill="y", padx=30, pady=15)
         
-        stat_frame = tk.Frame(header, bg="#e6e6e6")
-        stat_frame.pack(side="right", padx=20, pady=10)
-        tk.Label(stat_frame, textvariable=controller.battery_val, fg="#333333", bg="#e6e6e6", font=("Arial", 20, "bold")).pack(anchor="e")
+        tk.Label(left_info, text="WIRELESS SENSOR - LADLE STATION", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 18, "bold")).pack(anchor="w")
         
-        time_frame = tk.Frame(header, bg="#e6e6e6")
-        time_frame.pack(side="right", padx=30, fill="y")
-        self.lbl_time = tk.Label(time_frame, text="00:00:00", fg="#333333", bg="#e6e6e6", font=("Arial", 14, "bold"))
-        self.lbl_time.pack(anchor="center")
-        self.lbl_date = tk.Label(time_frame, text="DD-MMM-YYYY", fg="#666666", bg="#e6e6e6", font=("Arial", 10))
-        self.lbl_date.pack(anchor="center")
+        device_frame = tk.Frame(left_info, bg="#e6e6e6")
+        device_frame.pack(fill="x", pady=(5, 0))
+        tk.Label(device_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
+        tk.Label(device_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 12, "bold")).pack(side="left", padx=5)
+        
+        # Time and status (center)
+        center_info = tk.Frame(header, bg="#e6e6e6")
+        center_info.pack(side="left", fill="both", expand=True, padx=20)
+        
+        self.lbl_time = tk.Label(center_info, text="00:00:00", fg="#333333", bg="#e6e6e6", 
+                                font=("Arial", 16, "bold"))
+        self.lbl_time.pack()
+        self.lbl_date = tk.Label(center_info, text="DD-MMM-YYYY", fg="#666666", bg="#e6e6e6", 
+                                font=("Arial", 11))
+        self.lbl_date.pack()
         self.update_clock()
         
+        # Battery and RSSI (right side)
+        right_info = tk.Frame(header, bg="#e6e6e6")
+        right_info.pack(side="right", padx=30, pady=15)
+        
+        self.lbl_bat = tk.Label(right_info, text="BAT --%", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 20, "bold"))
+        self.lbl_bat.pack(anchor="e")
+        controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}%"))
+        
+        self.lbl_rssi = tk.Label(right_info, text="RSSI --", fg="#0055aa", bg="#e6e6e6", 
+                font=("Arial", 20, "bold"))
+        self.lbl_rssi.pack(anchor="e")
+        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"RSSI {controller.rssi_val.get()}"))
+        
+        # Main content area
         self.main_container = tk.Frame(self, bg="#ffffff")
-        self.main_container.pack(expand=True, fill="both")
+        self.main_container.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
+        self.main_container.grid_rowconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(0, weight=1)
         
-        tk.Label(self.main_container, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 22)).pack(pady=(60, 10))
-        tk.Label(self.main_container, textvariable=controller.current_temp, bg="#ffffff", fg="#d40000", font=("Arial", 120, "bold")).pack()
-        tk.Label(self.main_container, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 40)).pack(pady=(0, 30))
+        # Temperature display area (large)
+        temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
+        temp_display_area.grid(row=0, column=0, sticky="nsew")
+        temp_display_area.grid_rowconfigure(0, weight=1)
+        temp_display_area.grid_rowconfigure(1, weight=0)
+        temp_display_area.grid_columnconfigure(0, weight=1)
         
-        sensor_frame = tk.Frame(self.main_container, bg="#ffffff")
-        sensor_frame.pack(pady=20, fill="x")
+        # Centered temperature section
+        center_frame = tk.Frame(temp_display_area, bg="#ffffff")
+        center_frame.grid(row=0, column=0, sticky="nsew")
         
-        tk.Label(sensor_frame, text="RTD (Temp):", font=("Arial", 14), anchor="e", fg="#333").pack(side="left", padx=20)
-        tk.Label(sensor_frame, textvariable=controller.rtd_temp, font=("Arial", 28, "bold"), fg="#5cb85c").pack(side="left", padx=10)
+        tk.Label(center_frame, text="THERMOCOUPLE", fg="#333333", bg="#ffffff", 
+                font=("Arial", 22, "bold")).pack(pady=(40, 10))
         
-        tk.Label(sensor_frame, text="Thermocouple:", font=("Arial", 14), anchor="e", fg="#333").pack(side="left", padx=20)
-        tk.Label(sensor_frame, textvariable=controller.thermo_val, font=("Arial", 28, "bold"), fg="#0275d8").pack(side="left", padx=10)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
+        temp_box.pack(pady=20, padx=20)
         
-        footer = tk.Frame(self, bg="#e6e6e6", height=100)
-        footer.pack(fill="x", side="bottom")
+        tk.Label(temp_box, textvariable=controller.current_temp, bg="#d40000", fg="#ffffff", 
+                font=("Arial", 120, "bold"), padx=40, pady=20).pack()
         
+        tk.Label(center_frame, text="MV", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
+        
+        # Sensor data grid (RTD, Thermocouple, RSSI)
+        sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
+        sensor_frame.grid(row=1, column=0, sticky="ew", pady=30, padx=20)
+        sensor_frame.grid_columnconfigure(0, weight=1)
+        sensor_frame.grid_columnconfigure(1, weight=1)
+        sensor_frame.grid_columnconfigure(2, weight=1)
+        
+        # RTD sensor
+        rtd_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        rtd_frame.grid(row=0, column=0, sticky="nsew", padx=10)
+        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(rtd_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff", 
+                font=("Arial", 32, "bold")).pack(pady=10)
+        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+        
+        #Thermocouple sensor
+        
+        """thermo_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        thermo_frame.grid(row=0, column=1, sticky="nsew", padx=10)
+        tk.Label(thermo_frame, text="THERMOCOUPLE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(thermo_frame, textvariable=controller.thermo_val, fg="#cc3300", bg="#ffffff", 
+               font=("Arial", 32, "bold")).pack(pady=10)
+        tk.Label(thermo_frame, text="mV", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()"""
+
+        temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
+        
+        tk.Label(temp_frame, text="TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
+        font=("Arial", 32, "bold")).pack(pady=10)
+
+        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+ 
+        # RSSI indicator
+        rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        rssi_frame.grid(row=0, column=2, sticky="nsew", padx=10)
+        tk.Label(rssi_frame, text="SIGNAL STRENGTH", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#ccaa00", bg="#ffffff", 
+                font=("Arial", 28, "bold")).pack(pady=10)
+        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+        
+        # Footer with controls
+        footer = tk.Frame(self, bg="#e6e6e6", height=70)
+        footer.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+        footer.grid_propagate(False)
+        
+        # Port controls (left)
         port_frame = tk.Frame(footer, bg="#e6e6e6")
-        port_frame.pack(side="left", padx=20, pady=15)
-        tk.Label(port_frame, text="Port:", fg="#333333", bg="#e6e6e6", font=("Arial", 11)).pack(side="left", padx=5)
+        port_frame.pack(side="left", padx=20, pady=12)
+        
+        tk.Label(port_frame, text="USB Port:", fg="#333333", bg="#e6e6e6", font=("Arial", 11, "bold")).pack(side="left", padx=5)
         self.combo = ttk.Combobox(port_frame, width=20, state="readonly", font=("Arial", 10))
-        self.combo.pack(side="left", padx=5)
+        self.combo.pack(side="left", padx=10)
         
+        # Buttons (center-left)
         btn_frame = tk.Frame(footer, bg="#e6e6e6")
-        btn_frame.pack(side="left", padx=10, pady=15)
+        btn_frame.pack(side="left", padx=10, pady=12)
         
-        tk.Button(btn_frame, text="Refresh", command=self.update_ports, font=("Arial", 10), width=12, bg="#cccccc").pack(side="left", padx=3)
-        tk.Button(btn_frame, text="Connect", command=self._open_port, font=("Arial", 10), width=12, bg="#0066cc", fg="white").pack(side="left", padx=3)
-        tk.Button(btn_frame, text="Disconnect", command=self._close_port, font=("Arial", 10), width=12, bg="#cc0000", fg="white").pack(side="left", padx=3)
+        tk.Button(btn_frame, text="🔄 REFRESH", command=self.update_ports, font=("Arial", 10, "bold"), 
+                 width=12, bg="#666666", fg="white").pack(side="left", padx=3)
+        tk.Button(btn_frame, text="✓ CONNECT", command=self._open_port, font=("Arial", 10, "bold"), 
+                 width=12, bg="#009900", fg="white").pack(side="left", padx=3)
+        tk.Button(btn_frame, text="✗ DISCONNECT", command=self._close_port, font=("Arial", 10, "bold"), 
+                 width=14, bg="#cc0000", fg="white").pack(side="left", padx=3)
         
-        tk.Button(footer, text="⚙ CONFIGURATION", bg="#666666", fg="white", font=("Arial", 12, "bold"), width=20, command=self.check_password).pack(side="right", padx=20, pady=15)
-        
-        self.status_label = tk.Label(self.main_container, textvariable=controller.status_msg, fg="#006600", font=("Arial", 10))
-        self.status_label.pack(pady=5)
+        # Settings button (right)
+        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"), 
+                 width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
         self.update_ports()
     
@@ -737,7 +816,7 @@ class DashboardFrame(tk.Frame):
             self.combo.current(0)
     
     def _open_port(self):
-        """Open port"""
+        """Open selected port"""
         sel = self.combo.get()
         if not sel:
             messagebox.showerror("Error", "Select a port")
@@ -745,7 +824,7 @@ class DashboardFrame(tk.Frame):
         
         success, msg = self.controller.port_manager.open_port(sel)
         if success:
-            self.controller.status_msg.set(f"Connected: {sel}")
+            self.controller.device_id_val.set(sel)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
             self._read_data()
@@ -757,7 +836,7 @@ class DashboardFrame(tk.Frame):
         self.controller.port_manager.close_port()
         self.controller.is_reading = False
         self.controller.is_paired.set(False)
-        self.controller.status_msg.set("Disconnected")
+        self.controller.device_id_val.set("NOT PAIRED")
         self.controller.packet_processor.reset()
     
     def _read_data(self):
@@ -781,11 +860,17 @@ class DashboardFrame(tk.Frame):
         """Process sensor data"""
         try:
             data = self.controller.data_parser.parse_packet(packet)
+            
+            # Print room temperature
+           
+            
             self.controller.current_temp.set(f"{data.temperature:.1f}")
             self.controller.device_id_val.set(data.device_id)
             self.controller.rtd_temp.set(str(data.rtd_temperature))
             self.controller.thermo_val.set(str(data.thermocouple))
             self.controller.battery_val.set(f"{data.battery_voltage:.2f}V")
+            self.controller.rssi_val.set(f"RSSI: {data.rssi} dBm") 
+
         except ValueError as e:
             logger.error(f"Parse error: {e}")
     
@@ -799,38 +884,111 @@ class DashboardFrame(tk.Frame):
 
 
 class SettingsFrame(tk.Frame):
-    """Settings frame"""
+    """Settings frame - Configuration"""
     
     def __init__(self, parent, controller):
         super().__init__(parent, bg="#f0f0f0")
         self.controller = controller
         
-        tk.Label(self, text="CONFIGURATION", fg="#333333", bg="#f0f0f0", font=("Arial", 28, "bold")).pack(pady=10)
+        # Header
+        header = tk.Frame(self, bg="#e6e6e6", height=60)
+        header.pack(fill="x", padx=0, pady=0)
+        header.pack_propagate(False)
         
+        tk.Label(header, text="CONFIGURATION - WIRELESS SENSOR SYSTEM", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 18, "bold")).pack(side="left", padx=30, pady=15)
+        
+        tk.Button(header, text="← BACK TO DASHBOARD", bg="#cccccc", fg="black", font=("Arial", 10, "bold"),
+                 command=lambda: controller.show_frame("DashboardFrame"), 
+                 activebackground="#000000", activeforeground="#ffffff").pack(side="right", padx=20, pady=12)
+        
+        # Content area
+        content = tk.Frame(self, bg="#f0f0f0")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Notebook style
         style = ttk.Style()
-        style.configure("TNotebook.Tab", font=("Arial", 11), padding=[15, 8])
+        style.theme_use('clam')
+        style.configure("TNotebook", background="#f0f0f0", borderwidth=0)
+        style.configure("TNotebook.Tab", font=("Arial", 11, "bold"), padding=[15, 8], background="#cccccc", foreground="#000000")
+        style.map("TNotebook.Tab", background=[("selected", "#ffffff")], foreground=[("selected", "#000000")])
+        style.configure("TFrame", background="#f0f0f0")
+        style.configure("TLabel", background="#f0f0f0", foreground="#333333", font=("Arial", 11))
         
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True, padx=30, pady=10)
+        nb = ttk.Notebook(content)
+        nb.pack(fill="both", expand=True, padx=0, pady=0)
         
+        # Device Info Tab
         tab1 = tk.Frame(nb, bg="#f0f0f0")
-        nb.add(tab1, text="Device Info")
+        nb.add(tab1, text="Device Information")
         
-        tk.Label(tab1, text="Paired Device:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="w", padx=20, pady=10)
-        tk.Label(tab1, textvariable=controller.device_id_val, font=("Arial", 14, "bold"), fg="#0055aa", bg="#f0f0f0").pack(anchor="w", padx=40, pady=5)
+        tab1_content = tk.Frame(tab1, bg="#f0f0f0")
+        tab1_content.pack(fill="both", expand=True, padx=30, pady=30)
         
+        tk.Label(tab1_content, text="Connected Device", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        device_box = tk.Frame(tab1_content, bg="#e6e6e6", relief="ridge", borderwidth=2)
+        device_box.pack(fill="x", pady=10)
+        
+        tk.Label(device_box, text="Device ID:", fg="#666666", bg="#e6e6e6", 
+                font=("Arial", 11)).pack(anchor="w", padx=15, pady=(10, 5))
+        tk.Label(device_box, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 14, "bold")).pack(anchor="w", padx=30, pady=(0, 10))
+        
+        # Sensor Data Tab
         tab2 = tk.Frame(nb, bg="#f0f0f0")
-        nb.add(tab2, text="Sensor Data")
+        nb.add(tab2, text="Real-time Sensor Data")
         
-        tk.Label(tab2, text="Temperature:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="w", padx=20, pady=10)
-        tk.Label(tab2, textvariable=controller.current_temp, font=("Arial", 14, "bold"), fg="#d40000", bg="#f0f0f0").pack(anchor="w", padx=40, pady=5)
+        tab2_content = tk.Frame(tab2, bg="#f0f0f0")
+        tab2_content.pack(fill="both", expand=True, padx=30, pady=30)
+
+        #RTD
+        tk.Label(tab2_content, text="RTD Temperature", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(20, 10))
         
-        tk.Label(tab2, text="Battery:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="w", padx=20, pady=10)
-        tk.Label(tab2, textvariable=controller.battery_val, font=("Arial", 14, "bold"), fg="#333333", bg="#f0f0f0").pack(anchor="w", padx=40, pady=5)
+        rtd_box = tk.Frame(tab2_content, bg="#eef0ff", relief="ridge", borderwidth=2)
+        rtd_box.pack(fill="x", pady=10)
         
-        btn_frame = tk.Frame(self, bg="#f0f0f0")
-        btn_frame.pack(pady=15)
-        tk.Button(btn_frame, text="✔ EXIT", bg="#4caf50", fg="white", font=("Arial", 12, "bold"), padx=30, pady=10, command=self.exit_settings).pack()
+        tk.Label(rtd_box, textvariable=controller.rtd_temp, fg="#0066cc", bg="#eef0ff", 
+                font=("Arial", 20, "bold")).pack(padx=15, pady=10)
+        
+       #Battery
+        tk.Label(tab2_content, text="Battery Status", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(20, 10))
+        
+        battery_box = tk.Frame(tab2_content, bg="#ffffee", relief="ridge", borderwidth=2)
+        battery_box.pack(fill="x", pady=10)
+        
+        tk.Label(battery_box, textvariable=controller.battery_val, fg="#ccaa00", bg="#ffffee", 
+                font=("Arial", 18, "bold")).pack(padx=15, pady=10)
+        
+        #System Info Tab
+        tab3 = tk.Frame(nb, bg="#f0f0f0")
+        nb.add(tab3, text="System Information")
+        
+        tab3_content = tk.Frame(tab3, bg="#f0f0f0")
+        tab3_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        info_box = tk.Frame(tab3_content, bg="#e6e6e6", relief="ridge", borderwidth=2)
+        info_box.pack(fill="x", pady=10)
+        
+        tk.Label(info_box, text="Application: Wireless Molten Metal Temperature System", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
+        tk.Label(info_box, text="Interface: ACUCAST Standard", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
+        tk.Label(info_box, text="Baud Rate: 115200", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
+        tk.Label(info_box, text="Packet Length: 16 bytes", fg="#333333", bg="#e6e6e6", 
+                font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
+    
+    def check_password_for_exit(self):
+        """Verify password before exiting settings"""
+        password = simpledialog.askstring("Confirm", "Enter Password to Confirm:", show='*')
+        if password == "1111":
+            self.exit_settings()
+        elif password is not None:
+            messagebox.showerror("Access Denied", "Wrong Password")
     
     def exit_settings(self):
         """Exit settings"""
