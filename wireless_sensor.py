@@ -745,15 +745,9 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 32, "bold")).pack(pady=10)
         tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
         
-        #Thermocouple sensor
         
-        """thermo_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        thermo_frame.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(thermo_frame, text="THERMOCOUPLE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
-        tk.Label(thermo_frame, textvariable=controller.thermo_val, fg="#cc3300", bg="#ffffff", 
-               font=("Arial", 32, "bold")).pack(pady=10)
-        tk.Label(thermo_frame, text="mV", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()"""
-
+        
+        #TEMPERATURE sensor
         temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
         temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
         
@@ -787,13 +781,32 @@ class DashboardFrame(tk.Frame):
         # Buttons (center-left)
         btn_frame = tk.Frame(footer, bg="#e6e6e6")
         btn_frame.pack(side="left", padx=10, pady=12)
+        self.btn_refresh = tk.Button(
+            btn_frame, text="🔄 REFRESH", command=self.update_ports,
+            font=("Arial", 10, "bold"), width=12, bg="#666666", fg="white"
+        )
+        self.btn_refresh.pack(side="left", padx=3)
+
+        self.btn_connect = tk.Button(
+            btn_frame, text="✓ CONNECT", command=self._open_port,
+            font=("Arial", 10, "bold"), width=12, bg="#009900", fg="white"
+        )
+        self.btn_connect.pack(side="left", padx=3)
+
+        self.btn_disconnect = tk.Button(
+            btn_frame, text="✗ DISCONNECT", command=self._close_port,
+            font=("Arial", 10, "bold"), width=14, bg="#cc0000", fg="white"
+        )
+        self.btn_disconnect.pack(side="left", padx=3)
         
-        tk.Button(btn_frame, text="🔄 REFRESH", command=self.update_ports, font=("Arial", 10, "bold"), 
+
+        
+        """tk.Button(btn_frame, text="🔄 REFRESH", command=self.update_ports, font=("Arial", 10, "bold"), 
                  width=12, bg="#666666", fg="white").pack(side="left", padx=3)
         tk.Button(btn_frame, text="✓ CONNECT", command=self._open_port, font=("Arial", 10, "bold"), 
                  width=12, bg="#009900", fg="white").pack(side="left", padx=3)
         tk.Button(btn_frame, text="✗ DISCONNECT", command=self._close_port, font=("Arial", 10, "bold"), 
-                 width=14, bg="#cc0000", fg="white").pack(side="left", padx=3)
+                 width=14, bg="#cc0000", fg="white").pack(side="left", padx=3)"""
         
         # Settings button (right)
         tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"), 
