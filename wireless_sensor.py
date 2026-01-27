@@ -20,6 +20,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+
 class SensorErrorType(Enum):
     """Enumeration for sensor error types"""
     INVALID_PACKET_LENGTH = "Invalid packet length"
@@ -374,6 +375,13 @@ class ThermocoupleTable:
         except Exception as e:
             logger.error(f"Error converting thermocouple voltage to temperature: {e}")
             raise ValueError(f"Failed to convert thermocouple voltage: {e}")
+        OEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
+               4.5508542e-13,-1.5523037e-16,2.9886750e-20, -2.4742860e-24,
+]
+
+#COEFFS_HIGH = [-2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
+##               1.1195870e-15,-6.0625199e-21,1.8661696e-25,-2.4878585e-30,
+#]
 
 
 class SerialPortManager:
@@ -571,8 +579,17 @@ class SensorDataParser:
             
             # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
             thermo_raw = packet[13]
-            thermo_raw = (thermo_raw << 8) | packet[12]
-            thermo = (thermo_raw * 1.2) / (32 * 2**15)
+            thermo_raw = (thermo_raw << 8) | packet[12]        
+            thermo_temp = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
+
+            # Convert to microvolts for the polynomial (µV)
+            #thermo_uV = thermo_mv * 1000.0
+
+            # Convert µV -> temperature using provided coefficients
+            #thermo_temp = voltage_uV_to_temperature_C(thermo_uV)
+
+
+            #thermo = (thermo_raw * 1.2) / (32 * 2**15)
             
             # Parse battery voltage from bytes 14-15 (2 bytes, big-endian)
             battery_voltage = ((packet[15] << 8) | packet[14]) / 1000.0
@@ -586,7 +603,7 @@ class SensorDataParser:
                 device_id=device_id,
                 rtd_resistance=rtd_resistance,
                 rtd_temperature=rtd_temperature,
-                thermocouple=thermo,
+                thermocouple=thermo_temp,
                 battery_voltage=battery_voltage,
                 rssi=rssi,
                 raw_packet=packet
@@ -725,7 +742,7 @@ class DashboardFrame(tk.Frame):
         temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
         temp_box.pack(pady=20, padx=20)
         
-        tk.Label(temp_box, textvariable=controller.current_temp, bg="#d40000", fg="#ffffff", 
+        tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff", 
                 font=("Arial", 120, "bold"), padx=40, pady=20).pack()
         
         tk.Label(center_frame, text="MV", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
@@ -875,14 +892,21 @@ class DashboardFrame(tk.Frame):
             data = self.controller.data_parser.parse_packet(packet)
             
             # Print room temperature
-           
-            
+             
             self.controller.current_temp.set(f"{data.temperature:.1f}")
             self.controller.device_id_val.set(data.device_id)
             self.controller.rtd_temp.set(str(data.rtd_temperature))
             self.controller.thermo_val.set(str(data.thermocouple))
             self.controller.battery_val.set(f"{data.battery_voltage:.2f}V")
             self.controller.rssi_val.set(f"RSSI: {data.rssi} dBm") 
+            if data.thermocouple is not None:
+             self.controller.thermo_val.set(f"{data.thermocouple:.1f}")
+            else:
+              self.controller.thermo_val.set("--")
+              logger.error("Thermocouple value is None (out-of-range voltage or bad data)")
+            
+            self.controller.battery_val.set(f"{data.battery_voltage:.2f}V")
+            self.controller.rssi_val.set(f"RSSI: {data.rssi} dBm")
 
         except ValueError as e:
             logger.error(f"Parse error: {e}")
