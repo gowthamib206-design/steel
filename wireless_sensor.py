@@ -446,10 +446,10 @@ def voltage_uV_to_temperature_C(uV):
     T1 = evaluate_polynomial(coeffs, mv1)
     T2 = evaluate_polynomial(coeffs, mv2)
     # slope in (°C per µV)
-    slope = (T2 - T1) / (v2_uv - v1_uv)
-    intercept = T1 - slope * v1_uv
+    #slope = (T2 - T1) / (v2_uv - v1_uv)
+    #intercept = T1 - slope * v1_uv
 
-    return temp_C, range_label, slope, intercept
+    #return temp_C, range_label, slope, intercept
 
 
 
