@@ -386,6 +386,73 @@ COEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10
                4.5508542e-13,-1.5523037e-16,2.9886750e-20, -2.4742860e-24,
 ]
 
+# Valid emf ranges in microvolts (µV)
+RANGE_LOW_UV = (291.0, 2431.0)     # lower and upper bounds (µV)
+RANGE_HIGH_UV = (2431.0, 13820.0)   # lower and upper bounds (µV)
+
+
+def evaluate_polynomial(coeffs, x):
+    """
+    Evaluate polynomial given coefficients c0..cn and scalar x.
+    Uses Horner's method. x is expected to be in millivolts (mV) for these coefficients.
+    """
+    result = 0.0
+    for c in reversed(coeffs):
+        result = result * x + c
+    return result
+
+
+def voltage_uV_to_temperature_C(uV):
+    """
+    Convert thermocouple voltage in microvolts (uV) to temperature (°C) using the provided
+    polynomial coefficients. Also compute a simple 'perfect line' (linear approximation)
+    based on the endpoints of the active range and return slope/intercept for that line.
+
+    Returns:
+        (temperature_C, range_label, slope, intercept)
+    """
+    if uV is None:
+        raise ValueError("Voltage must be numeric")
+
+    uV = float(uV)
+
+    # choose coefficients and endpoints
+    if RANGE_LOW_UV[0] <= uV <= RANGE_LOW_UV[1]:
+        coeffs = COEFFS_LOW
+        v1_uv, v2_uv = RANGE_LOW_UV
+        range_label = "LOW"
+    elif RANGE_HIGH_UV[0] < uV <= RANGE_HIGH_UV[1]:
+        coeffs = COEFFS_HIGH
+        v1_uv, v2_uv = RANGE_HIGH_UV
+        range_label = "HIGH"
+    else:
+        # outside ranges: pick nearest range for extrapolation
+        if uV < RANGE_LOW_UV[0]:
+            coeffs = COEFFS_LOW
+            v1_uv, v2_uv = RANGE_LOW_UV
+            range_label = "LOW (extrapolated below)"
+        else:
+            coeffs = COEFFS_HIGH
+            v1_uv, v2_uv = RANGE_HIGH_UV
+            range_label = "HIGH (extrapolated above)"
+
+    # polynomial expects mV
+    mv = uV / 1000.0
+    temp_C = evaluate_polynomial(coeffs, mv)
+
+    # compute perfect (linear) line using endpoints of the range (in µV)
+    mv1 = v1_uv / 1000.0
+    mv2 = v2_uv / 1000.0
+    T1 = evaluate_polynomial(coeffs, mv1)
+    T2 = evaluate_polynomial(coeffs, mv2)
+    # slope in (°C per µV)
+    slope = (T2 - T1) / (v2_uv - v1_uv)
+    intercept = T1 - slope * v1_uv
+
+    return temp_C, range_label, slope, intercept
+
+
+
 class SerialPortManager:
     """Manages serial port operations"""
     
@@ -582,17 +649,22 @@ class SensorDataParser:
             # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
             thermo_raw = packet[13]
             thermo_raw = (thermo_raw << 8) | packet[12]        
-            thermo_temp = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
+            thermo_uV = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
+             # Convert µV -> temperature using provided coefficients
+            try:
+                thermo_temperature_C, range_label, slope, intercept = voltage_uV_to_temperature_C(thermo_uV)
+            except Exception as e:
+                logger.error(f"Thermocouple conversion error: {e}")
+                thermo_temperature_C = None
+                range_label = "ERR"
+                slope = intercept = 0.0
 
-            # Convert to microvolts for the polynomial (µV)
-            #thermo_uV = thermo_mv * 1000.0
+            # Print thermocouple debug info (user requested the thermocouple value be printed)
+            print(f"Thermocouple raw: {thermo_raw} | voltage: {thermo_uV:.3f} µV | "
+                  f"temperature: {thermo_temperature_C if thermo_temperature_C is not None else 'N/A'} °C | "
+                  f"range: {range_label} | perfect_line slope: {slope:.6e}, intercept: {intercept:.6e}")
 
-            # Convert µV -> temperature using provided coefficients
-            #thermo_temp = voltage_uV_to_temperature_C(thermo_uV)
-
-
-            #thermo = (thermo_raw * 1.2) / (32 * 2**15)
-            
+           
             # Parse battery voltage from bytes 14-15 (2 bytes, big-endian)
             battery_voltage = ((packet[15] << 8) | packet[14]) / 1000.0
             
@@ -605,7 +677,7 @@ class SensorDataParser:
                 device_id=device_id,
                 rtd_resistance=rtd_resistance,
                 rtd_temperature=rtd_temperature,
-                thermocouple=thermo_temp,
+                thermocouple=thermo_temperature_C,
                 battery_voltage=battery_voltage,
                 rssi=rssi,
                 raw_packet=packet
