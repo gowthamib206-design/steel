@@ -375,84 +375,71 @@ class ThermocoupleTable:
         except Exception as e:
             logger.error(f"Error converting thermocouple voltage to temperature: {e}")
             raise ValueError(f"Failed to convert thermocouple voltage: {e}")
-        COEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
-               4.5508542e-13,-1.5523037e-16,2.9886750e-20, -2.4742860e-24,
+# =========================
+# Thermocouple calculation
+# =========================
+
+# LOW range coefficients (291 µV – 2431 µV)
+COEFFS_LOW = [ 9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
+              4.5508542e-13,-1.5523037e-16,2.9886750e-20,-2.4742860e-24,
 ]
 
+# HIGH range coefficients (2431 µV – 13820 µV)
 COEFFS_HIGH = [-2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
-               1.1195870e-15,-6.0625199e-21,1.8661696e-25,-2.4878585e-30,
-]
-COEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
-               4.5508542e-13,-1.5523037e-16,2.9886750e-20, -2.4742860e-24,
+               1.1195870e-16,-6.0625199e-21, 1.8661696e-25,-2.4878585e-30,
 ]
 
-# Valid emf ranges in microvolts (µV)
-RANGE_LOW_UV = (291.0, 2431.0)     # lower and upper bounds (µV)
-RANGE_HIGH_UV = (2431.0, 13820.0)   # lower and upper bounds (µV)
+RANGE_LOW_UV = (291.0, 2431.0)
+RANGE_HIGH_UV = (2431.0, 13820.0)
 
-
-def evaluate_polynomial(coeffs, x):
+def raw_to_voltage_uV(raw_value):
     """
-    Evaluate polynomial given coefficients c0..cn and scalar x.
-    Uses Horner's method. x is expected to be in millivolts (mV) for these coefficients.
+    Convert raw thermocouple ADC value to voltage in µV.
+    Formula: v = (raw * 1250000) / (32 * 2**16)
     """
-    result = 0.0
-    for c in reversed(coeffs):
-        result = result * x + c
-    return result
-
+    return (raw_value * 1250000.0) / (32.0 * (2**16))
 
 def voltage_uV_to_temperature_C(uV):
     """
-    Convert thermocouple voltage in microvolts (uV) to temperature (°C) using the provided
-    polynomial coefficients. Also compute a simple 'perfect line' (linear approximation)
-    based on the endpoints of the active range and return slope/intercept for that line.
-
-    Returns:
-        (temperature_C, range_label, slope, intercept)
+    Convert voltage (µV) to temperature (°C) using polynomial directly.
     """
-    if uV is None:
-        raise ValueError("Voltage must be numeric")
-
-    uV = float(uV)
-
-    # choose coefficients and endpoints
+    # choose coefficients based on range
     if RANGE_LOW_UV[0] <= uV <= RANGE_LOW_UV[1]:
         coeffs = COEFFS_LOW
-        v1_uv, v2_uv = RANGE_LOW_UV
-        range_label = "LOW"
     elif RANGE_HIGH_UV[0] < uV <= RANGE_HIGH_UV[1]:
         coeffs = COEFFS_HIGH
-        v1_uv, v2_uv = RANGE_HIGH_UV
-        range_label = "HIGH"
     else:
-        # outside ranges: pick nearest range for extrapolation
-        if uV < RANGE_LOW_UV[0]:
-            coeffs = COEFFS_LOW
-            v1_uv, v2_uv = RANGE_LOW_UV
-            range_label = "LOW (extrapolated below)"
-        else:
-            coeffs = COEFFS_HIGH
-            v1_uv, v2_uv = RANGE_HIGH_UV
-            range_label = "HIGH (extrapolated above)"
+        coeffs = COEFFS_LOW if uV < RANGE_LOW_UV[0] else COEFFS_HIGH
 
-    # polynomial expects mV
-    mv = uV / 1000.0
-    temp_C = evaluate_polynomial(coeffs, mv)
+    # polynomial expects millivolts
+    v = uV 
 
-    # compute perfect (linear) line using endpoints of the range (in µV)
-    mv1 = v1_uv / 1000.0
-    mv2 = v2_uv / 1000.0
-    T1 = evaluate_polynomial(coeffs, mv1)
-    T2 = evaluate_polynomial(coeffs, mv2)
-    # slope in (°C per µV)
-    #slope = (T2 - T1) / (v2_uv - v1_uv)
-    #intercept = T1 - slope * v1_uv
+    # expand polynomial manually (no Horner’s method, no helper function)
+    """temp_C = (coeffs[0]
+              + coeffs[1] * v
+              + coeffs[2] * (v ** 2)
+              + coeffs[3] * (v ** 3)
+              + coeffs[4] * (v ** 4)
+              + coeffs[5] * (v ** 5)
+              + coeffs[6] * (v ** 6)
+              + coeffs[7] * (v ** 7)
+              + coeffs[8] * (v ** 8))"""
+    terms = []
+    for i in range(len(coeffs)):
+     c = coeffs[i]
+     t = c * (v ** i)
+     terms.append(t)
+     print(f"t{i} = {c} * (v^{i}) = {t}")
+     
 
-    #return temp_C, range_label, slope, intercept
+# sum all terms
+    temp_C = sum(terms)
+    print(f"Final Temperature (°C) = {temp_C}")
+    print(f"uV={uV} ,v(mV)={v}, coeffs={coeffs}, temp_C={temp_C}")
 
 
-
+    return temp_C
+    
 class SerialPortManager:
     """Manages serial port operations"""
     
@@ -648,23 +635,15 @@ class SensorDataParser:
             
             # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
             thermo_raw = packet[13]
-            thermo_raw = (thermo_raw << 8) | packet[12]        
-            thermo_uV = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
+            thermo_raw = (thermo_raw << 8) | packet[12] 
+            thermo_uV = raw_to_voltage_uV(thermo_raw)
+            thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
+       
+            #thermo_uV = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
              # Convert µV -> temperature using provided coefficients
-            try:
-                thermo_temperature_C, range_label, slope, intercept = voltage_uV_to_temperature_C(thermo_uV)
-            except Exception as e:
-                logger.error(f"Thermocouple conversion error: {e}")
-                thermo_temperature_C = None
-                range_label = "ERR"
-                slope = intercept = 0.0
+          
 
-            # Print thermocouple debug info (user requested the thermocouple value be printed)
-            print(f"Thermocouple raw: {thermo_raw} | voltage: {thermo_uV:.3f} µV | "
-                  f"temperature: {thermo_temperature_C if thermo_temperature_C is not None else 'N/A'} °C | "
-                  f"range: {range_label} | perfect_line slope: {slope:.6e}, intercept: {intercept:.6e}")
 
-           
             # Parse battery voltage from bytes 14-15 (2 bytes, big-endian)
             battery_voltage = ((packet[15] << 8) | packet[14]) / 1000.0
             
