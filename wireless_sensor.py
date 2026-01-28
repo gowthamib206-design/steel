@@ -375,14 +375,16 @@ class ThermocoupleTable:
         except Exception as e:
             logger.error(f"Error converting thermocouple voltage to temperature: {e}")
             raise ValueError(f"Failed to convert thermocouple voltage: {e}")
-        OEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
+        COEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
                4.5508542e-13,-1.5523037e-16,2.9886750e-20, -2.4742860e-24,
 ]
 
-#COEFFS_HIGH = [-2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
-##               1.1195870e-15,-6.0625199e-21,1.8661696e-25,-2.4878585e-30,
-#]
-
+COEFFS_HIGH = [-2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
+               1.1195870e-15,-6.0625199e-21,1.8661696e-25,-2.4878585e-30,
+]
+COEFFS_LOW = [9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
+               4.5508542e-13,-1.5523037e-16,2.9886750e-20, -2.4742860e-24,
+]
 
 class SerialPortManager:
     """Manages serial port operations"""
