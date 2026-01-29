@@ -379,13 +379,15 @@ class ThermocoupleTable:
 # Thermocouple calculation
 # =========================
 
+
+
 # LOW range coefficients (291 µV – 2431 µV)
 COEFFS_LOW = [ 9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
               4.5508542e-13,-1.5523037e-16,2.9886750e-20,-2.4742860e-24,
 ]
 
 # HIGH range coefficients (2431 µV – 13820 µV)
-COEFFS_HIGH = [-2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
+COEFFS_HIGH = [2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
                1.1195870e-16,-6.0625199e-21, 1.8661696e-25,-2.4878585e-30,
 ]
 
@@ -686,6 +688,10 @@ class SensorGUI(tk.Tk):
         self.state('zoomed')
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
+
+        self.sel = tk.StringVar(value="")
+        self.apply_rtd_compensation = tk.BooleanVar(value=False)  # or IntVar/DoubleVar depending on your need
+
         
         self.port_manager = SerialPortManager()
         self.packet_processor = PacketProcessor()
@@ -701,7 +707,6 @@ class SensorGUI(tk.Tk):
         self.is_reading = False
         self.is_paired = tk.BooleanVar(value=False)  
 
-        
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
         
@@ -722,9 +727,10 @@ class SensorGUI(tk.Tk):
 class DashboardFrame(tk.Frame):
     """Main dashboard display - Full Screen"""
     
-    def __init__(self, parent, controller):
+    def __init__(self,parent, controller):
         super().__init__(parent, bg="#1a1a1a")
         self.controller = controller
+
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
         
@@ -789,7 +795,7 @@ class DashboardFrame(tk.Frame):
         center_frame = tk.Frame(temp_display_area, bg="#ffffff")
         center_frame.grid(row=0, column=0, sticky="nsew")
         
-        tk.Label(center_frame, text="THERMOCOUPLE", fg="#333333", bg="#ffffff", 
+        tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
                 font=("Arial", 22, "bold")).pack(pady=(40, 10))
         
         temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
@@ -798,7 +804,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff", 
                 font=("Arial", 120, "bold"), padx=40, pady=20).pack()
         
-        tk.Label(center_frame, text="MV", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
+        tk.Label(center_frame, text="", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
         
         # Sensor data grid (RTD, Thermocouple, RSSI)
         sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
@@ -821,19 +827,19 @@ class DashboardFrame(tk.Frame):
         temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
         temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
         
-        tk.Label(temp_frame, text="TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
         tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
         font=("Arial", 32, "bold")).pack(pady=10)
 
         tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
  
         # RSSI indicator
-        rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        """rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
         rssi_frame.grid(row=0, column=2, sticky="nsew", padx=10)
         tk.Label(rssi_frame, text="SIGNAL STRENGTH", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
         tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#ccaa00", bg="#ffffff", 
                 font=("Arial", 28, "bold")).pack(pady=10)
-        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()"""
         
         # Footer with controls
         footer = tk.Frame(self, bg="#e6e6e6", height=70)
@@ -868,9 +874,30 @@ class DashboardFrame(tk.Frame):
             font=("Arial", 10, "bold"), width=14, bg="#cc0000", fg="white"
         )
         self.btn_disconnect.pack(side="left", padx=3)
-        
 
-        
+        # RTD Compensation checkbox (center-right)
+        comp_frame = tk.Frame(footer, bg="#e6e6e6")
+        comp_frame.pack(side="left", padx=10, pady=12)
+        tk.Checkbutton(
+            comp_frame,
+            text="Apply RTD Compensation",
+            variable=controller.apply_rtd_compensation,
+            bg="#e6e6e6",
+            onvalue=True,
+            offvalue=False
+        ).pack()
+
+        # Settings button (right)
+        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
+                 width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
+
+        # Ensure initial button states: connect & refresh enabled, disconnect disabled
+        self.btn_connect.config(state="normal")
+        self.btn_refresh.config(state="normal")
+        self.btn_disconnect.config(state="disabled")
+
+        self.update_ports() 
+   
         """tk.Button(btn_frame, text="🔄 REFRESH", command=self.update_ports, font=("Arial", 10, "bold"), 
                  width=12, bg="#666666", fg="white").pack(side="left", padx=3)
         tk.Button(btn_frame, text="✓ CONNECT", command=self._open_port, font=("Arial", 10, "bold"), 
@@ -879,10 +906,10 @@ class DashboardFrame(tk.Frame):
                  width=14, bg="#cc0000", fg="white").pack(side="left", padx=3)"""
         
         # Settings button (right)
-        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"), 
+        """tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"), 
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
-        self.update_ports()
+        self.update_ports()"""
     
     def update_clock(self):
         """Update time and date"""
@@ -910,6 +937,11 @@ class DashboardFrame(tk.Frame):
             self.controller.device_id_val.set(sel)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
+
+            self.btn_connect.config(state="disabled")
+            self.btn_refresh.config(state="disabled")
+            self.btn_disconnect.config(state="normal")
+
             self._read_data()
         else:
             messagebox.showerror("Error", msg)
@@ -921,6 +953,11 @@ class DashboardFrame(tk.Frame):
         self.controller.is_paired.set(False)
         self.controller.device_id_val.set("NOT PAIRED")
         self.controller.packet_processor.reset()
+
+         # Restore button states
+        self.btn_connect.config(state="normal")
+        self.btn_refresh.config(state="normal")
+        self.btn_disconnect.config(state="disabled")
     
     def _read_data(self):
         """Read from serial port"""
