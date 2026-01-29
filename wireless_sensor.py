@@ -733,7 +733,10 @@ class DashboardFrame(tk.Frame):
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
+
+    
+
+
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
@@ -804,7 +807,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff", 
                 font=("Arial", 120, "bold"), padx=40, pady=20).pack()
         
-        tk.Label(center_frame, text="", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
+        tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
         
         # Sensor data grid (RTD, Thermocouple, RSSI)
         sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
@@ -875,41 +878,59 @@ class DashboardFrame(tk.Frame):
         )
         self.btn_disconnect.pack(side="left", padx=3)
 
-        # RTD Compensation checkbox (center-right)
-        comp_frame = tk.Frame(footer, bg="#e6e6e6")
-        comp_frame.pack(side="left", padx=10, pady=12)
-        tk.Checkbutton(
-            comp_frame,
-            text="Apply RTD Compensation",
-            variable=controller.apply_rtd_compensation,
-            bg="#e6e6e6",
-            onvalue=True,
-            offvalue=False
-        ).pack()
-
-        # Settings button (right)
+         # Settings button (right)
         tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
-
+        
         # Ensure initial button states: connect & refresh enabled, disconnect disabled
         self.btn_connect.config(state="normal")
         self.btn_refresh.config(state="normal")
         self.btn_disconnect.config(state="disabled")
 
         self.update_ports() 
-   
-        """tk.Button(btn_frame, text="🔄 REFRESH", command=self.update_ports, font=("Arial", 10, "bold"), 
-                 width=12, bg="#666666", fg="white").pack(side="left", padx=3)
-        tk.Button(btn_frame, text="✓ CONNECT", command=self._open_port, font=("Arial", 10, "bold"), 
-                 width=12, bg="#009900", fg="white").pack(side="left", padx=3)
-        tk.Button(btn_frame, text="✗ DISCONNECT", command=self._close_port, font=("Arial", 10, "bold"), 
-                 width=14, bg="#cc0000", fg="white").pack(side="left", padx=3)"""
+       
+        # RTD Compensation checkbox (center-right)
+        comp_frame = tk.Frame(footer, bg="#e6e6e6")
+        comp_frame.pack(side="left", padx=10, pady=12)
+        tk.Checkbutton(
+           comp_frame,
+           text="Apply RTD Compensation",
+           variable=controller.apply_rtd_compensation,
+           bg="#e6e6e6",
+           onvalue=True,
+           offvalue=False,
+           command=self.on_rtd_compensation_changed
+        ).pack()
+    def on_rtd_compensation_changed(self):
+        # Get current checkbox state
+        enabled = self.controller.apply_rtd_compensation.get()
+        self.send_rtd_compensation_command(enabled)
+
+    def send_rtd_compensation_command(self, enable):
+        if not self.controller.port_manager.is_open:
+            return
+
+        try:
+            packet = bytes([
+                0xAA,                    # START BYTE
+                0x10,                    # RTD COMPENSATION COMMAND
+                0x01 if enable else 0x00,# VALUE
+                0x55                     # END BYTE
+            ])
+            self.controller.port_manager.ser.write(packet)
+            self.controller.port_manager.ser.flush()
+
+        except Exception as e:
+            print("RTD command send error:", e)    
         
-        # Settings button (right)
-        """tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"), 
-                 width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
-        self.update_ports()"""
+        # Ensure initial button states: connect & refresh enabled, disconnect disabled
+        self.btn_connect.config(state="normal")
+        self.btn_refresh.config(state="normal")
+        self.btn_disconnect.config(state="disabled")
+
+        self.update_ports() 
+       
     
     def update_clock(self):
         """Update time and date"""
@@ -937,6 +958,10 @@ class DashboardFrame(tk.Frame):
             self.controller.device_id_val.set(sel)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
+            self.send_rtd_compensation_command(
+            self.controller.apply_rtd_compensation.get()
+    )
+
 
             self.btn_connect.config(state="disabled")
             self.btn_refresh.config(state="disabled")
@@ -975,7 +1000,7 @@ class DashboardFrame(tk.Frame):
         
         if self.controller.is_reading:
             self.after(1, self._read_data)
-    
+
     def _process_data(self, packet):
         """Process sensor data"""
         try:
