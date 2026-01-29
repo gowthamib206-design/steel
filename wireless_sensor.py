@@ -733,10 +733,9 @@ class DashboardFrame(tk.Frame):
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
+        self.battery_alerted = False  # to prevent repeated popups
 
     
-
-
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
@@ -775,12 +774,12 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 20, "bold"))
         self.lbl_bat.pack(anchor="e")
         controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}%"))
-        
         self.lbl_rssi = tk.Label(right_info, text="RSSI --", fg="#0055aa", bg="#e6e6e6", 
                 font=("Arial", 20, "bold"))
         self.lbl_rssi.pack(anchor="e")
         controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"RSSI {controller.rssi_val.get()}"))
-        
+
+       
         # Main content area
         self.main_container = tk.Frame(self, bg="#ffffff")
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
@@ -901,6 +900,7 @@ class DashboardFrame(tk.Frame):
            offvalue=False,
            command=self.on_rtd_compensation_changed
         ).pack()
+
     def on_rtd_compensation_changed(self):
         # Get current checkbox state
         enabled = self.controller.apply_rtd_compensation.get()
@@ -930,8 +930,22 @@ class DashboardFrame(tk.Frame):
         self.btn_disconnect.config(state="disabled")
 
         self.update_ports() 
-       
     
+    def check_battery(self, battery_text):
+        try:
+            percent = int(float(battery_text.replace("V", "").replace("%", "")))
+            
+            if percent <= 20:
+                self.lbl_bat.config(fg="red")  # Red alert
+                if not self.battery_alerted:
+                    self.battery_alerted = True
+                    messagebox.showwarning("Battery Low", f"⚠️ Battery is low: {percent}% remaining!")
+            else:
+                self.lbl_bat.config(fg="#333333")  # Normal color
+                self.battery_alerted = False
+        except Exception as e:
+            print(f"Battery check error: {e}")
+
     def update_clock(self):
         """Update time and date"""
         now = datetime.now()
@@ -1004,7 +1018,7 @@ class DashboardFrame(tk.Frame):
     def _process_data(self, packet):
         """Process sensor data"""
         try:
-            data = self.controller.data_parser.parse_packet(packet)
+            data = self.controller.data_parser.parse_packet(packet) 
             
             # Print room temperature
              
