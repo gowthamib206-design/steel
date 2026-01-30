@@ -962,56 +962,57 @@ class DashboardFrame(tk.Frame):
         except Exception as e:
           print(f"Battery check error: {e}")"""
     
-    def check_battery(self, battery_text,str):
-         """
-        Parse battery_text (e.g. "3.50V" or "3.5") and update GUI with alerts:
-          - Normal: >= 3.6V
-          - Low (YELLOW + single warning): 3.0V <= voltage <= 3.5V
-          - Critical (RED + error popup, rate-limited): < 3.0V
-        """
-         try:
-            # extract the first float-like substring
-            m = re.search(r"(\d+(?:\.\d+)?)", str(battery_text))
-            if not m:
-                logger.debug("No numeric value in battery_text: %s", battery_text)
-                return
-            voltage = float(m.group(1))
-            now = time.time()
+    def check_battery(self, battery_text):
+        # expects strings like "3.50V" or "3.5"
+        if not battery_text or battery_text == "--":
+          self.lbl_bat.config(text="BAT --", fg="#333333")
+          self.bat_progress['value'] = 0
+          self.bat_pct_label.config(text="--%", fg="#333333")
+          return
 
-            # NORMAL
-            if voltage >= 3.6:
-                self.lbl_bat.config(text=f"BAT {voltage:.2f}V", fg="#333333")
-                self.battery_alerted = False
+        m = re.search(r"(\d+(?:\.\d+)?)", str(battery_text))
+        if not m:
+          self.lbl_bat.config(text=f"BAT {battery_text}", fg="#333333")
+          return
 
-            # LOW BATTERY (YELLOW) - user requested 3.5 to show yellow
-            elif 3.0 <= voltage <= 3.5:
-                self.lbl_bat.config(text=f"BAT ⚠ {voltage:.2f}V", fg="orange")
-                if not self.battery_alerted:
-                    # show one-time low battery warning
-                    try:
-                        messagebox.showwarning("Low Battery", f"Battery low: {voltage:.2f}V")
-                    except Exception:
-                        logger.warning("Low Battery: %sV (could not show messagebox)", voltage)
-                    self.battery_alerted = True
+        voltage = float(m.group(1))
+        # linear map 3.0V->0%  4.2V->100%
+        pct = int(round(100.0 * (voltage - 3.0) / (4.2 - 3.0)))
+        pct = max(0, min(100, pct))
 
-            # CRITICAL BATTERY (RED) - user requested 3.0 big red alert near shutdown
-            else:  # voltage < 3.0
-                self.lbl_bat.config(text=f"BAT 🔴 {voltage:.2f}V", fg="red")
-                # Show critical error every 10 seconds at most
-                if now - self.last_battery_alert > 10:
-                    try:
-                        messagebox.showerror(
-                            "Critical Battery",
-                            f"Battery critically low ({voltage:.2f}V)!\nSystem may shut down!",
-                        )
-                    except Exception:
-                        logger.error("Critical battery: %sV (could not show messagebox)", voltage)
-                    self.last_battery_alert = now
+        # update UI
+        self.lbl_bat.config(text=f"BAT {voltage:.2f}V ({pct}%)")
+        try:
+            self.bat_progress['value'] = pct
+        except Exception:
+            pass
+        self.bat_pct_label.config(text=f"{pct}%")
+        # color indicator
+        if voltage >= 3.6:
+         color = "#006600"   # good
+        elif voltage >= 3.0:
+         color = "orange"    # low
+        else:
+         color = "red"       # critical
 
-         except Exception:
-            logger.exception("Battery error while parsing: %s", battery_text)
-
-
+        self.lbl_bat.config(fg=color)
+        self.bat_pct_label.config(fg=color)
+ 
+        # optional: rate-limited popups for low/critical
+        now = time.time()
+        if voltage < 3.0 and now - getattr(self, "last_battery_alert", 0) > 10:
+            try:
+               messagebox.showerror("Critical Battery", f"Battery critically low ({voltage:.2f}V) - {pct}%")
+            except Exception:
+               pass
+            self.last_battery_alert = now
+        elif 3.0 <= voltage < 3.6 and not getattr(self, "battery_alerted", False):
+            try:
+               messagebox.showwarning("Low Battery", f"Battery low: {voltage:.2f}V ({pct}%)")
+            except Exception:
+             pass
+             self.battery_alerted = True
+    
     def update_clock(self):
         """Update time and date"""
         now = datetime.now()
