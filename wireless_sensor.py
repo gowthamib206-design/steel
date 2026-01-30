@@ -14,6 +14,8 @@ from enum import Enum
 import logging
 import struct
 from datetime import datetime
+import time
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -696,7 +698,7 @@ class SensorGUI(tk.Tk):
         self.port_manager = SerialPortManager()
         self.packet_processor = PacketProcessor()
         self.data_parser = SensorDataParser()
-        
+         # Observable variables
         self.current_temp = tk.StringVar(value="--")
         self.device_id_val = tk.StringVar(value="NOT PAIRED")
         self.rtd_temp = tk.StringVar(value="--")
@@ -733,9 +735,11 @@ class DashboardFrame(tk.Frame):
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
+        self.last_battery_alert = 0  # timestamp of last battery warning
         self.battery_alerted = False  # to prevent repeated popups
-
-    
+        self.last_thermocouple = None
+        self.rtd_ready = False  # Flag to indicate RTD & TC data is received
+        self.rtd_ready = False
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
@@ -774,10 +778,10 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 20, "bold"))
         self.lbl_bat.pack(anchor="e")
         controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}%"))
-        self.lbl_rssi = tk.Label(right_info, text="RSSI --", fg="#0055aa", bg="#e6e6e6", 
+        self.lbl_rssi = tk.Label(right_info, text="SIGNAL STRENGTH(RSSI)", fg="#0055aa", bg="#e6e6e6", 
                 font=("Arial", 20, "bold"))
         self.lbl_rssi.pack(anchor="e")
-        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"RSSI {controller.rssi_val.get()}"))
+        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
 
        
         # Main content area
@@ -896,16 +900,35 @@ class DashboardFrame(tk.Frame):
            text="Apply RTD Compensation",
            variable=controller.apply_rtd_compensation,
            bg="#e6e6e6",
-           onvalue=True,
-           offvalue=False,
+           #onvalue=True,
+           #offvalue=False,
            command=self.on_rtd_compensation_changed
         ).pack()
 
     def on_rtd_compensation_changed(self):
-        # Get current checkbox state
-        enabled = self.controller.apply_rtd_compensation.get()
-        self.send_rtd_compensation_command(enabled)
+      enabled = self.controller.apply_rtd_compensation.get()
+      #print("checkbox value:", enabled)
 
+    # send command to device
+      self.send_rtd_compensation_command(enabled)
+
+    # read last received values
+      tc = self.last_thermocouple
+      rtd = self.last_rtd
+
+      #logger.info("RTD checkbox toggled")
+
+      if tc is None:
+        logger.info("Thermocouple value not available yet")
+        return
+
+      if enabled and rtd is not None:
+        logger.info(f"RTD Compensation ON → TC + RTD = {tc + rtd:.2f} °C")
+      else:
+        logger.info(f"RTD Compensation OFF → TC = {tc:.2f} °C")
+
+
+       
     def send_rtd_compensation_command(self, enable):
         if not self.controller.port_manager.is_open:
             return
@@ -921,30 +944,73 @@ class DashboardFrame(tk.Frame):
             self.controller.port_manager.ser.flush()
 
         except Exception as e:
-            print("RTD command send error:", e)    
-        
-        
-        # Ensure initial button states: connect & refresh enabled, disconnect disabled
-        self.btn_connect.config(state="normal")
-        self.btn_refresh.config(state="normal")
-        self.btn_disconnect.config(state="disabled")
+            print("RTD command send error:", e)      
 
-        self.update_ports() 
-    
-    def check_battery(self, battery_text):
+    """def check_battery(self, battery_text):
         try:
+            # Convert battery value to integer percent
             percent = int(float(battery_text.replace("V", "").replace("%", "")))
-            
-            if percent <= 20:
-                self.lbl_bat.config(fg="red")  # Red alert
-                if not self.battery_alerted:
-                    self.battery_alerted = True
-                    messagebox.showwarning("Battery Low", f"⚠️ Battery is low: {percent}% remaining!")
-            else:
-                self.lbl_bat.config(fg="#333333")  # Normal color
-                self.battery_alerted = False
+        
+            now = time.time()
+        # Show warning every 5 seconds if battery is low
+            if percent <= 20 and now - self.last_battery_alert > 5:
+              self.lbl_bat.config(fg="red")  # Red alert
+              messagebox.showwarning("Battery Low", f"⚠️ Battery is low: {percent}% remaining!")
+              self.last_battery_alert = now
+            elif percent > 20:
+              self.lbl_bat.config(fg="#333333")  # Normal color
         except Exception as e:
-            print(f"Battery check error: {e}")
+          print(f"Battery check error: {e}")"""
+    
+    def check_battery(self, battery_text,str):
+         """
+        Parse battery_text (e.g. "3.50V" or "3.5") and update GUI with alerts:
+          - Normal: >= 3.6V
+          - Low (YELLOW + single warning): 3.0V <= voltage <= 3.5V
+          - Critical (RED + error popup, rate-limited): < 3.0V
+        """
+         try:
+            # extract the first float-like substring
+            m = re.search(r"(\d+(?:\.\d+)?)", str(battery_text))
+            if not m:
+                logger.debug("No numeric value in battery_text: %s", battery_text)
+                return
+            voltage = float(m.group(1))
+            now = time.time()
+
+            # NORMAL
+            if voltage >= 3.6:
+                self.lbl_bat.config(text=f"BAT {voltage:.2f}V", fg="#333333")
+                self.battery_alerted = False
+
+            # LOW BATTERY (YELLOW) - user requested 3.5 to show yellow
+            elif 3.0 <= voltage <= 3.5:
+                self.lbl_bat.config(text=f"BAT ⚠ {voltage:.2f}V", fg="orange")
+                if not self.battery_alerted:
+                    # show one-time low battery warning
+                    try:
+                        messagebox.showwarning("Low Battery", f"Battery low: {voltage:.2f}V")
+                    except Exception:
+                        logger.warning("Low Battery: %sV (could not show messagebox)", voltage)
+                    self.battery_alerted = True
+
+            # CRITICAL BATTERY (RED) - user requested 3.0 big red alert near shutdown
+            else:  # voltage < 3.0
+                self.lbl_bat.config(text=f"BAT 🔴 {voltage:.2f}V", fg="red")
+                # Show critical error every 10 seconds at most
+                if now - self.last_battery_alert > 10:
+                    try:
+                        messagebox.showerror(
+                            "Critical Battery",
+                            f"Battery critically low ({voltage:.2f}V)!\nSystem may shut down!",
+                        )
+                    except Exception:
+                        logger.error("Critical battery: %sV (could not show messagebox)", voltage)
+                    self.last_battery_alert = now
+
+         except Exception:
+            logger.exception("Battery error while parsing: %s", battery_text)
+
 
     def update_clock(self):
         """Update time and date"""
@@ -972,10 +1038,8 @@ class DashboardFrame(tk.Frame):
             self.controller.device_id_val.set(sel)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
-            self.send_rtd_compensation_command(
-            self.controller.apply_rtd_compensation.get()
-    )
-
+            
+            self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
 
             self.btn_connect.config(state="disabled")
             self.btn_refresh.config(state="disabled")
@@ -1018,27 +1082,77 @@ class DashboardFrame(tk.Frame):
     def _process_data(self, packet):
         """Process sensor data"""
         try:
-            data = self.controller.data_parser.parse_packet(packet) 
-            
-            # Print room temperature
-             
-            self.controller.current_temp.set(f"{data.temperature:.1f}")
-            self.controller.device_id_val.set(data.device_id)
-            self.controller.rtd_temp.set(str(data.rtd_temperature))
-            self.controller.thermo_val.set(str(data.thermocouple))
-            self.controller.battery_val.set(f"{data.battery_voltage:.2f}V")
-            self.controller.rssi_val.set(f"RSSI: {data.rssi} dBm") 
-            if data.thermocouple is not None:
-             self.controller.thermo_val.set(f"{data.thermocouple:.1f}")
-            else:
-              self.controller.thermo_val.set("--")
-              logger.error("Thermocouple value is None (out-of-range voltage or bad data)")
-            
-            self.controller.battery_val.set(f"{data.battery_voltage:.2f}V")
-            self.controller.rssi_val.set(f"RSSI: {data.rssi} dBm")
-
+            data = self.controller.data_parser.parse_packet(packet)
         except ValueError as e:
-            logger.error(f"Parse error: {e}")
+            logger.error("Parse error: %s", e)
+            return
+        except Exception:
+            logger.exception("Unexpected error while parsing packet")
+            return
+
+        # Safely extract fields
+        self.last_thermocouple = getattr(data, "thermocouple", None)
+        self.last_rtd = getattr(data, "rtd_temperature", None)
+
+        if not self.rtd_ready and self.last_thermocouple is not None and self.last_rtd is not None:
+            self.rtd_ready = True
+            logger.info("RTD data is ready — you can now apply compensation")
+            logger.info("Received Sensor Data → TC: %s, RTD: %s, Battery: %s",
+                        data.thermocouple, data.rtd_temperature, getattr(data, "battery_voltage", None))
+
+        # Update UI fields
+        try:
+            temp = getattr(data, "temperature", None)
+            self.controller.current_temp.set(f"{temp:.1f}" if temp is not None else "--")
+        except Exception:
+            self.controller.current_temp.set("--")
+
+        if getattr(data, "device_id", None):
+            self.controller.device_id_val.set(data.device_id)
+
+        try:
+            rtd_val = getattr(data, "rtd_temperature", None)
+            self.controller.rtd_temp.set(f"{rtd_val:.1f}" if rtd_val is not None else "--")
+        except Exception:
+            self.controller.rtd_temp.set("--")
+
+        tc = getattr(data, "thermocouple", None)
+        if tc is not None:
+            self.controller.thermo_val.set(f"{tc:.1f}")
+        else:
+            self.controller.thermo_val.set("--")
+            logger.error("Thermocouple value is None (out-of-range voltage or bad data)")
+
+        # Battery: accept battery_voltage (float) or battery_text
+        batt = getattr(data, "battery_voltage", None)
+        if batt is None:
+            batt_text = getattr(data, "battery_text", None)
+            if batt_text:
+                m = re.search(r"(\d+(?:\.\d+)?)", str(batt_text))
+                if m:
+                    try:
+                        batt = float(m.group(1))
+                    except Exception:
+                        batt = None
+
+        if batt is not None:
+            self.controller.battery_val.set(f"{batt:.2f}V")
+        else:
+            # keep previous value or set to "--"
+            self.controller.battery_val.set("--")
+
+        # RSSI
+        rssi = getattr(data, "rssi", None)
+        if rssi is not None:
+            try:
+                self.controller.rssi_val.set(f"{float(rssi):.0f} dBm")
+            except Exception:
+                self.controller.rssi_val.set(str(rssi))
+        else:
+            # if parser gives no rssi, keep existing value
+            if self.controller.rssi_val.get() == "":
+                self.controller.rssi_val.set("--")
+       
     
     def check_password(self):
         """Check password"""
