@@ -6,6 +6,7 @@ Modern UI based on ACUCAST reference
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+from PIL import Image, ImageTk
 import serial
 import serial.tools.list_ports
 from typing import List, Optional, Tuple
@@ -20,7 +21,6 @@ import re
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
 
 
 class SensorErrorType(Enum):
@@ -744,7 +744,9 @@ class DashboardFrame(tk.Frame):
         header = tk.Frame(self, bg="#e6e6e6", height=100)
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         header.grid_propagate(False)
-        
+
+        # ===== add ARRDY logo at top-right (insert here, right after header.grid_propagate(False)) =====
+
         # Title and device info (left side)
         left_info = tk.Frame(header, bg="#e6e6e6")
         left_info.pack(side="left", fill="y", padx=30, pady=15)
@@ -757,6 +759,19 @@ class DashboardFrame(tk.Frame):
         tk.Label(device_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
         tk.Label(device_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 12, "bold")).pack(side="left", padx=5)
+             
+        try:
+            original_img = Image.open("arrdy_logo.png")
+            base_height = 60
+            h_percent = (base_height / float(original_img.size[1]))
+            w_size = int((float(original_img.size[0]) * float(h_percent)))
+            resized_img = original_img.resize((w_size, base_height), Image.Resampling.LANCZOS)
+            self.arrdy_logo = ImageTk.PhotoImage(resized_img)
+            logo_label = tk.Label(header, image=self.arrdy_logo, bg="#e6e6e6")
+            logo_label.pack(side="right", anchor="n", padx=10, pady=10)
+        except Exception:
+            tk.Label(header, text="[ARRDY]", bg="#e6e6e6", fg="#884400", font=("Arial", 16, "bold")).pack(side="right", anchor="n", padx=10, pady=10)
+        
         
         # Time and status (center)
         center_info = tk.Frame(header, bg="#e6e6e6")
@@ -782,7 +797,19 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 20, "bold"))
         self.lbl_rssi.pack(anchor="e")
         controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
-
+        
+        """try:
+            original_img = Image.open("arrdy_logo.png")
+            base_height = 60
+            h_percent = (base_height / float(original_img.size[1]))
+            w_size = int((float(original_img.size[0]) * float(h_percent)))
+            resized_img = original_img.resize((w_size, base_height), Image.Resampling.LANCZOS)
+            self.arrdy_logo = ImageTk.PhotoImage(resized_img)
+            logo_label = tk.Label(header, image=self.arrdy_logo, bg="#e6e6e6")
+            logo_label.pack(side="right", anchor="n", padx=10, pady=10)
+        except Exception:
+            tk.Label(header, text="[ARRDY]", bg="#e6e6e6", fg="#884400", font=("Arial", 16, "bold")).pack(side="right", anchor="n", padx=10, pady=10)"""
+        
        
         # Main content area
         self.main_container = tk.Frame(self, bg="#ffffff")
@@ -804,11 +831,12 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
                 font=("Arial", 22, "bold")).pack(pady=(40, 10))
         
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=400, height=200)
         temp_box.pack(pady=20, padx=20)
+        temp_box.pack_propagate(False)
         
         tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff", 
-                font=("Arial", 120, "bold"), padx=40, pady=20).pack()
+                font=("Arial", 120, "bold"), padx=40, pady=20).pack(expand=True)
         
         tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
         
@@ -891,77 +919,68 @@ class DashboardFrame(tk.Frame):
         self.btn_disconnect.config(state="disabled")
 
         self.update_ports() 
-       
-        # RTD Compensation checkbox (center-right)
+         # -------------------------------
+# RTD Compensation Checkbox Setup
+# -------------------------------
         comp_frame = tk.Frame(footer, bg="#e6e6e6")
         comp_frame.pack(side="left", padx=10, pady=12)
+
         tk.Checkbutton(
-           comp_frame,
-           text="Apply RTD Compensation",
-           variable=controller.apply_rtd_compensation,
-           bg="#e6e6e6",
-           #onvalue=True,
-           #offvalue=False,
-           command=self.on_rtd_compensation_changed
+         comp_frame,
+         text="Apply RTD Compensation",
+         variable=controller.apply_rtd_compensation,  # should be a tk.BooleanVar()
+         bg="#e6e6e6",
+         command=self.on_rtd_compensation_changed
         ).pack()
 
+# -------------------------------
+# Callback Function
+# -------------------------------
     def on_rtd_compensation_changed(self):
-      enabled = self.controller.apply_rtd_compensation.get()
-      #print("checkbox value:", enabled)
+    
+     enabled = self.controller.apply_rtd_compensation.get()  # True/False
 
-    # send command to device
-      self.send_rtd_compensation_command(enabled)
+    # Read last received sensor values
+     tc = self.last_thermocouple
+     rtd = self.last_rtd
 
-    # read last received values
-      tc = self.last_thermocouple
-      rtd = self.last_rtd
-
-      #logger.info("RTD checkbox toggled")
-
-      if tc is None:
-        logger.info("Thermocouple value not available yet")
+     if tc is None:
+        print("Thermocouple value not available yet")
         return
 
-      if enabled and rtd is not None:
-        logger.info(f"RTD Compensation ON → TC + RTD = {tc + rtd:.2f} °C")
-      else:
-        logger.info(f"RTD Compensation OFF → TC = {tc:.2f} °C")
+    # Calculate compensated temperature if checkbox is ON
+     if enabled and rtd is not None:
+        compensated = tc + rtd
+        print(f"RTD Compensation ON → TC + RTD = {compensated:.2f} °C")
+        self.controller.thermo_val.set(f"{compensated:.1f}")
+     else:
+        print(f"RTD Compensation OFF → TC = {tc:.2f} °C")
+        self.controller.thermo_val.set(f"{tc:.1f}")
 
+    # Send command to hardware
+        self.send_rtd_compensation_command(enabled)
 
-       
-    def send_rtd_compensation_command(self, enable):
-        if not self.controller.port_manager.is_open:
-            return
-
+# -------------------------------
+# Hardware Command Function
+# -------------------------------
+    def send_rtd_compensation_command(self, enabled):
+   
         try:
-            packet = bytes([
-                0xAA,                    # START BYTE
-                0x10,                    # RTD COMPENSATION COMMAND
-                0x01 if enable else 0x00,# VALUE
-                0x55                     # END BYTE
-            ])
-            self.controller.port_manager.ser.write(packet)
-            self.controller.port_manager.ser.flush()
+          if enabled:
+            cmd = b'RTD_ON\n'   # replace with your device command
+          else:
+            cmd = b'RTD_OFF\n'
 
+        # Send via serial port
+          if hasattr(self.controller, 'serial') and self.controller.serial:
+            self.controller.serial.write(cmd)
+            print(f"Sent command to hardware: {cmd.decode().strip()}")
+          else:
+            print("Serial port not ready. Command not sent.")
         except Exception as e:
-            print("RTD command send error:", e)      
+          print(f"Error sending RTD command: {e}")
+  
 
-    """def check_battery(self, battery_text):
-        try:
-            # Convert battery value to integer percent
-            percent = int(float(battery_text.replace("V", "").replace("%", "")))
-        
-            now = time.time()
-        # Show warning every 5 seconds if battery is low
-            if percent <= 20 and now - self.last_battery_alert > 5:
-              self.lbl_bat.config(fg="red")  # Red alert
-              messagebox.showwarning("Battery Low", f"⚠️ Battery is low: {percent}% remaining!")
-              self.last_battery_alert = now
-            elif percent > 20:
-              self.lbl_bat.config(fg="#333333")  # Normal color
-        except Exception as e:
-          print(f"Battery check error: {e}")"""
-    
     def check_battery(self, battery_text):
         # expects strings like "3.50V" or "3.5"
         if not battery_text or battery_text == "--":
@@ -1033,7 +1052,10 @@ class DashboardFrame(tk.Frame):
         if not sel:
             messagebox.showerror("Error", "Select a port")
             return
-        
+        self.btn_connect.config(state="disabled")
+        self.btn_refresh.config(state="disabled")
+        self.btn_disconnect.config(state="normal")
+
         success, msg = self.controller.port_manager.open_port(sel)
         if success:
             self.controller.device_id_val.set(sel)
