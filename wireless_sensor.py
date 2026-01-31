@@ -687,9 +687,17 @@ class SensorGUI(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("WIRELESS SENSOR - MOLTEN METAL CONTINUOUS TEMPERATURE SYSTEM")
+        # Make the window fullscreen by default and also start maximized
+        try:
+            self.attributes('-fullscreen', True)
+        except Exception:
+            pass
         self.state('zoomed')
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
+
+        # Allow exiting fullscreen with Escape (handy for testing)
+        self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
 
         self.sel = tk.StringVar(value="")
         self.apply_rtd_compensation = tk.BooleanVar(value=False)  # or IntVar/DoubleVar depending on your need
@@ -711,6 +719,12 @@ class SensorGUI(tk.Tk):
 
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
+        # Ensure grid-managed children inside the container expand to fill the window
+        try:
+            self.container.grid_rowconfigure(0, weight=1)
+            self.container.grid_columnconfigure(0, weight=1)
+        except Exception:
+            pass
         
         self.frames = {}
         for F in (DashboardFrame, SettingsFrame):
