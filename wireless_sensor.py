@@ -798,17 +798,6 @@ class DashboardFrame(tk.Frame):
         self.lbl_rssi.pack(anchor="e")
         controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
         
-        """try:
-            original_img = Image.open("arrdy_logo.png")
-            base_height = 60
-            h_percent = (base_height / float(original_img.size[1]))
-            w_size = int((float(original_img.size[0]) * float(h_percent)))
-            resized_img = original_img.resize((w_size, base_height), Image.Resampling.LANCZOS)
-            self.arrdy_logo = ImageTk.PhotoImage(resized_img)
-            logo_label = tk.Label(header, image=self.arrdy_logo, bg="#e6e6e6")
-            logo_label.pack(side="right", anchor="n", padx=10, pady=10)
-        except Exception:
-            tk.Label(header, text="[ARRDY]", bg="#e6e6e6", fg="#884400", font=("Arial", 16, "bold")).pack(side="right", anchor="n", padx=10, pady=10)"""
         
        
         # Main content area
