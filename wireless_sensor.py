@@ -257,7 +257,7 @@ class ThermocoupleTable:
                             3.466, 3.474, 3.482, 3.490, 3.498, 3.506, 3.514, 3.522, 3.530, 3.538, 3.546,
                             3.546, 3.554, 3.562, 3.570, 3.578, 3.586, 3.594, 3.602, 3.610, 3.618, 3.626,
                             3.626, 3.634, 3.643, 3.651, 3.659, 3.667, 3.675, 3.683, 3.692, 3.700, 3.708,
-                            3.708, 3.716, 3.724, 3.732, 3.741, 3.749, 3.757, 3.765, 3.774, 3.782, 3.790,
+                            3.708, 3.716, 3.724, 3.731, 3.739, 3.746, 3.753, 3.760, 3.768, 3.775, 3.782,
                             3.790, 3.798, 3.807, 3.815, 3.823, 3.832, 3.840, 3.848, 3.857, 3.865, 3.873,
                             3.873, 3.882, 3.890, 3.898, 3.907, 3.915, 3.923, 3.932, 3.940, 3.949, 3.957,
                             3.957, 3.965, 3.974, 3.982, 3.991, 3.999, 4.008, 4.016, 4.024, 4.033, 4.041,
@@ -706,64 +706,54 @@ class DashboardFrame(tk.Frame):
         self.main_container = tk.Frame(self, bg="#ffffff")
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
         self.main_container.grid_rowconfigure(0, weight=1)
+        # single-column layout to preserve original UI
         self.main_container.grid_columnconfigure(0, weight=1)
-        
+
         # Temperature display area (large)
         temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
         temp_display_area.grid(row=0, column=0, sticky="nsew")
         temp_display_area.grid_rowconfigure(0, weight=1)
         temp_display_area.grid_rowconfigure(1, weight=0)
         temp_display_area.grid_columnconfigure(0, weight=1)
-        
+
         # Centered temperature section
         center_frame = tk.Frame(temp_display_area, bg="#ffffff")
         center_frame.grid(row=0, column=0, sticky="nsew")
-        
+
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
                 font=("Arial", 22, "bold")).pack(pady=(40, 10))
-        
+
         temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
-        temp_box.pack(pady=20, padx=20)
-        
+        # make temp_box expand so it visually fills to the right as well
+        temp_box.pack(pady=20, padx=20, fill="both", expand=True)
+
         tk.Label(temp_box, textvariable=controller.current_temp, bg="#d40000", fg="#ffffff", 
                 font=("Arial", 120, "bold"), padx=40, pady=20).pack()
-        
+
         tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
-        
+
         # Sensor data grid (RTD, Thermocouple, RSSI)
         sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
         sensor_frame.grid(row=1, column=0, sticky="ew", pady=30, padx=20)
         sensor_frame.grid_columnconfigure(0, weight=1)
         sensor_frame.grid_columnconfigure(1, weight=1)
         sensor_frame.grid_columnconfigure(2, weight=1)
-        
-        # RTD sensor
-        rtd_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        rtd_frame.grid(row=0, column=0, sticky="nsew", padx=10)
-        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
-        tk.Label(rtd_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff", 
-                font=("Arial", 32, "bold")).pack(pady=10)
-        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
-        
-        # Thermocouple sensor
-        thermo_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        thermo_frame.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(thermo_frame, text="THERMOCOUPLE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
-        tk.Label(thermo_frame, textvariable=controller.thermo_val, fg="#cc3300", bg="#ffffff", 
-                font=("Arial", 32, "bold")).pack(pady=10)
-        tk.Label(thermo_frame, text="mV", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
-        
-        # RSSI indicator
-        rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        rssi_frame.grid(row=0, column=2, sticky="nsew", padx=10)
-        tk.Label(rssi_frame, text="SIGNAL STRENGTH", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
-        tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#ccaa00", bg="#ffffff", 
-                font=("Arial", 28, "bold")).pack(pady=10)
-        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
-        
+
+        tk.Label(sensor_frame, text="RTD Temp", fg="#333333", bg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=0, padx=10)
+        tk.Label(sensor_frame, text="Thermocouple", fg="#333333", bg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=1, padx=10)
+        tk.Label(sensor_frame, text="RSSI", fg="#333333", bg="#ffffff", font=("Arial", 14, "bold")).grid(row=0, column=2, padx=10)
+
+        tk.Label(sensor_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff", 
+                font=("Arial", 24, "bold")).grid(row=1, column=0, padx=10, pady=(5, 0))
+        tk.Label(sensor_frame, textvariable=controller.thermo_val, fg="#cc3300", bg="#ffffff", 
+                font=("Arial", 24, "bold")).grid(row=1, column=1, padx=10, pady=(5, 0))
+        tk.Label(sensor_frame, textvariable=controller.rssi_val, fg="#0055aa", bg="#ffffff", 
+                font=("Arial", 24, "bold")).grid(row=1, column=2, padx=10, pady=(5, 0))
+
         # Footer with controls
         footer = tk.Frame(self, bg="#e6e6e6", height=70)
-        footer.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+        # Span footer across both main columns so it sits under the full width
+        footer.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
         footer.grid_propagate(False)
         
         # Port controls (left)
