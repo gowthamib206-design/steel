@@ -16,6 +16,9 @@ import struct
 from datetime import datetime
 import time
 import re
+import sys
+import os
+from PIL import Image, ImageTk
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -696,6 +699,22 @@ class SensorGUI(tk.Tk):
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
 
+        # Load logo image
+        if getattr(sys, 'frozen', False):
+            # Running in a bundle
+            logo_path = os.path.join(sys._MEIPASS, 'arrdy-logo.png')
+        else:
+            logo_path = 'arrdy-logo.png'
+        
+        # Load with PIL for resizing
+        pil_image = Image.open(logo_path)
+        self.logo_img = ImageTk.PhotoImage(pil_image)  # For icon
+        self.iconphoto(False, self.logo_img)
+        
+        # Resize for display (50x50)
+        pil_image_resized = pil_image.resize((50, 50), Image.Resampling.LANCZOS)
+        self.logo_img_small = ImageTk.PhotoImage(pil_image_resized)
+
         # Allow exiting fullscreen with Escape (handy for testing)
         self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
 
@@ -759,9 +778,13 @@ class DashboardFrame(tk.Frame):
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         header.grid_propagate(False)
         
+        # Logo
+        logo_label = tk.Label(header, image=controller.logo_img_small, bg="#e6e6e6")
+        logo_label.pack(side="left", padx=10, pady=10)
+        
         # Title and device info (left side)
         left_info = tk.Frame(header, bg="#e6e6e6")
-        left_info.pack(side="left", fill="y", padx=30, pady=15)
+        left_info.pack(side="left", fill="y", padx=10, pady=15)
         
         tk.Label(left_info, text="WIRELESS SENSOR - LADLE STATION", fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 18, "bold")).pack(anchor="w")
