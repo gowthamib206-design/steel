@@ -45,6 +45,7 @@ class SensorData:
     rtd_resistance: float
     rtd_temperature: int
     thermocouple: float
+    thermocouple_voltage_uv: float  # Raw thermocouple voltage in microvolts
     battery_voltage: float
     rssi: int
     raw_packet: List[int]
@@ -664,6 +665,7 @@ class SensorDataParser:
                 rtd_resistance=rtd_resistance,
                 rtd_temperature=rtd_temperature,
                 thermocouple=thermo_temperature_C,
+                thermocouple_voltage_uv=thermo_uV,
                 battery_voltage=battery_voltage,
                 rssi=rssi,
                 raw_packet=packet
@@ -805,6 +807,9 @@ class DashboardFrame(tk.Frame):
         self.lbl_date = tk.Label(center_info, text="DD-MMM-YYYY", fg="#666666", bg="#e6e6e6", 
                                 font=("Arial", 11))
         self.lbl_date.pack()
+        self.lbl_status = tk.Label(center_info, textvariable=controller.status_msg, fg="#333333", bg="#e6e6e6", 
+                                font=("Arial", 12, "bold"))
+        self.lbl_status.pack(pady=(5, 0))
         self.update_clock()
         
         # Battery and RSSI (right side)
@@ -870,11 +875,11 @@ class DashboardFrame(tk.Frame):
         temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
         temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
         
-        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack(anchor='e')
         tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
-        font=("Arial", 32, "bold")).pack(pady=10)
+        font=("Arial", 32, "bold")).pack(pady=10, anchor='e')
 
-        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack(anchor='e')
  
         # RSSI indicator
         """rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
@@ -1138,6 +1143,9 @@ class DashboardFrame(tk.Frame):
             logger.info("Received Sensor Data → TC: %s, RTD: %s, Battery: %s",
                         data.thermocouple, data.rtd_temperature, getattr(data, "battery_voltage", None))
 
+        # Check for alerts
+        self._check_alerts(data)
+
         # Update UI fields
         try:
             temp = getattr(data, "temperature", None)
@@ -1155,7 +1163,12 @@ class DashboardFrame(tk.Frame):
             self.controller.rtd_temp.set("--")
 
         tc = getattr(data, "thermocouple", None)
-        if tc is not None:
+        tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
+        
+        if tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
+            # Special case: show "Thermo is connected" instead of temperature
+            self.controller.thermo_val.set("CONNECTED")
+        elif tc is not None:
             self.controller.thermo_val.set(f"{tc:.1f}")
         else:
             self.controller.thermo_val.set("--")
@@ -1191,6 +1204,55 @@ class DashboardFrame(tk.Frame):
             if self.controller.rssi_val.get() == "":
                 self.controller.rssi_val.set("--")
        
+    
+    def _check_alerts(self, data):
+        """Check sensor data for alert conditions"""
+        alerts = []
+        
+        # RTD resistance alerts
+        rtd_resistance = getattr(data, "rtd_resistance", None)
+        if rtd_resistance is not None:
+            if rtd_resistance < 100:
+                alerts.append(("RTD under lower limit. May be short circuit", "red"))
+            elif rtd_resistance > 390:
+                alerts.append(("RTD over upper limit. May be RTD is melt and open", "red"))
+        
+        # Thermocouple voltage alerts
+        tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
+        if tc_voltage_uv is not None:
+            if tc_voltage_uv < 100:
+                alerts.append(("Thermo couple temperature is under lower limit. May be Thermocouple may be short", "red"))
+            elif tc_voltage_uv > 14000:
+                alerts.append(("May be Thermocouple is not connected or short", "red"))
+            elif 100 <= tc_voltage_uv <= 1800:
+                # Special case: show "Thermo is connected" and don't show temperature
+                # (handled in main _process_data method)
+                pass
+        
+        # Battery voltage alerts
+        battery_voltage = getattr(data, "battery_voltage", None)
+        if battery_voltage is not None:
+            if battery_voltage < 3.35:
+                alerts.append(("Battery needs to be charged immediately. Sensor can't continue", "red"))
+            elif battery_voltage < 3.6:
+                alerts.append(("Battery should be charged", "yellow"))
+        
+        # Set status based on alerts
+        if alerts:
+            # Show the most critical alert (red takes precedence)
+            red_alerts = [alert for alert in alerts if alert[1] == "red"]
+            if red_alerts:
+                self.controller.status_msg.set(red_alerts[0][0])
+                self.lbl_status.config(fg="red")
+            else:
+                # Yellow alerts
+                yellow_alerts = [alert for alert in alerts if alert[1] == "yellow"]
+                if yellow_alerts:
+                    self.controller.status_msg.set(yellow_alerts[0][0])
+                    self.lbl_status.config(fg="orange")
+        else:
+            self.controller.status_msg.set("Normal")
+            self.lbl_status.config(fg="green")
     
     def check_password(self):
         """Check password"""

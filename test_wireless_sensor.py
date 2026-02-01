@@ -23,8 +23,10 @@ class TestSensorData(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=3.7,
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertTrue(data.is_valid())
     
@@ -36,8 +38,10 @@ class TestSensorData(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=3.7,
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertFalse(data.is_valid())
     
@@ -49,8 +53,10 @@ class TestSensorData(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=15.0,  # Too high
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertFalse(data.is_valid())
     
@@ -62,8 +68,10 @@ class TestSensorData(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=-1.0,  # Negative
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertFalse(data.is_valid())
     
@@ -75,7 +83,9 @@ class TestSensorData(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=3.7,
+            rssi=-50,
             raw_packet=list(range(10))  # Wrong length
         )
         self.assertFalse(data.is_valid())
@@ -88,8 +98,10 @@ class TestSensorData(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=3.7,
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertFalse(data.is_valid())
 
@@ -271,16 +283,15 @@ class TestSensorDataParser(unittest.TestCase):
     
     def test_parse_valid_packet(self):
         """Test parsing valid packet"""
-        # Create a valid 18-byte packet with realistic values
+        # Create a valid 16-byte packet with realistic values
         packet = [
-            0x00,  # Byte 0
-            0xE8, 0x03, 0x00, 0x00,  # Bytes 1-4: Temperature = 1000 (0.1°C)
-            0x00, 0x00,  # Bytes 5-6
-            0x01, 0x02, 0x03, 0x04,  # Bytes 7-10: Device ID
-            0x64, 0x00,  # Bytes 11-12: RTD = 100
-            0x00, 0x00,  # Bytes 13-14: Thermocouple
-            0xFC, 0x0E,  # Bytes 15-16: Battery voltage (3.84V = 3844mV)
-            0x00  # Byte 17
+            0xE8, 0x03, 0x00, 0x00,  # Bytes 0-3: Temperature = 1000 (0.1°C)
+            0x00,  # Byte 4: RSSI
+            0x00,  # Byte 5: Packet sequence
+            0x01, 0x02, 0x03, 0x04,  # Bytes 6-9: Device ID
+            0x64, 0x00,  # Bytes 10-11: RTD = 100
+            0x00, 0x00,  # Bytes 12-13: Thermocouple
+            0xFC, 0x0E,  # Bytes 14-15: Battery voltage (3.84V = 3844mV)
         ]
         result = self.parser.parse_packet(packet)
         self.assertIsNotNone(result)
@@ -290,9 +301,9 @@ class TestSensorDataParser(unittest.TestCase):
     
     def test_parse_negative_rtd_resistance(self):
         """Test parsing packet with negative RTD (should be handled gracefully)"""
-        packet = list(range(18))
-        packet[11] = 0xFF
-        packet[12] = 0xFF  # Will result in large value, not negative
+        packet = list(range(16))
+        packet[10] = 0xFF
+        packet[11] = 0xFF  # Will result in large value, not negative
         result = self.parser.parse_packet(packet)
         self.assertIsNotNone(result)
     
@@ -310,7 +321,7 @@ class TestSensorDataParser(unittest.TestCase):
     
     def test_parse_invalid_data_index(self):
         """Test parsing with malformed packet data"""
-        packet = list(range(18))
+        packet = list(range(16))
         packet[1] = 0xFF
         packet[2] = 0xFF
         packet[3] = 0xFF
@@ -357,8 +368,10 @@ class TestEdgeCases(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=0.0,
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertTrue(data.is_valid())
     
@@ -370,8 +383,10 @@ class TestEdgeCases(unittest.TestCase):
             rtd_resistance=100.0,
             rtd_temperature=50,
             thermocouple=15.5,
+            thermocouple_voltage_uv=500.0,
             battery_voltage=10.0,
-            raw_packet=list(range(18))
+            rssi=-50,
+            raw_packet=list(range(16))
         )
         self.assertTrue(data.is_valid())
 
