@@ -6,6 +6,7 @@ Modern UI based on ACUCAST reference
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+from PIL import Image, ImageTk
 import serial
 import serial.tools.list_ports
 from typing import List, Optional, Tuple
@@ -14,6 +15,8 @@ from enum import Enum
 import logging
 import struct
 from datetime import datetime
+import time
+import re
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -374,8 +377,73 @@ class ThermocoupleTable:
         except Exception as e:
             logger.error(f"Error converting thermocouple voltage to temperature: {e}")
             raise ValueError(f"Failed to convert thermocouple voltage: {e}")
+# =========================
+# Thermocouple calculation
+# =========================
 
 
+
+# LOW range coefficients (291 µV – 2431 µV)
+COEFFS_LOW = [ 9.8423321e1,6.9971500e-1,-8.4765304e-4,1.0052644e-6,-8.3345952e-10,
+              4.5508542e-13,-1.5523037e-16,2.9886750e-20,-2.4742860e-24,
+]
+
+# HIGH range coefficients (2431 µV – 13820 µV)
+COEFFS_HIGH = [2.1315071e2,2.8510504e-1,-5.2742887e-5,9.9160804e-9,-1.2965303e-12,
+               1.1195870e-16,-6.0625199e-21, 1.8661696e-25,-2.4878585e-30,
+]
+
+RANGE_LOW_UV = (291.0, 2431.0)
+RANGE_HIGH_UV = (2431.0, 13820.0)
+
+def raw_to_voltage_uV(raw_value):
+    """
+    Convert raw thermocouple ADC value to voltage in µV.
+    Formula: v = (raw * 1250000) / (32 * 2**16)
+    """
+    return (raw_value * 1250000.0) / (32.0 * (2**16))
+
+def voltage_uV_to_temperature_C(uV):
+    """
+    Convert voltage (µV) to temperature (°C) using polynomial directly.
+    """
+    # choose coefficients based on range
+    if RANGE_LOW_UV[0] <= uV <= RANGE_LOW_UV[1]:
+        coeffs = COEFFS_LOW
+    elif RANGE_HIGH_UV[0] < uV <= RANGE_HIGH_UV[1]:
+        coeffs = COEFFS_HIGH
+    else:
+        coeffs = COEFFS_LOW if uV < RANGE_LOW_UV[0] else COEFFS_HIGH
+
+    # polynomial expects millivolts
+    v = uV 
+
+    # expand polynomial manually (no Horner’s method, no helper function)
+    """temp_C = (coeffs[0]
+              + coeffs[1] * v
+              + coeffs[2] * (v ** 2)
+              + coeffs[3] * (v ** 3)
+              + coeffs[4] * (v ** 4)
+              + coeffs[5] * (v ** 5)
+              + coeffs[6] * (v ** 6)
+              + coeffs[7] * (v ** 7)
+              + coeffs[8] * (v ** 8))"""
+    terms = []
+    for i in range(len(coeffs)):
+     c = coeffs[i]
+     t = c * (v ** i)
+     terms.append(t)
+     print(f"t{i} = {c} * (v^{i}) = {t}")
+     
+
+# sum all terms
+    temp_C = sum(terms)
+    print(f"Final Temperature (°C) = {temp_C}")
+    print(f"uV={uV} ,v(mV)={v}, coeffs={coeffs}, temp_C={temp_C}")
+
+
+    return temp_C
+    
 class SerialPortManager:
     """Manages serial port operations"""
     
@@ -549,6 +617,7 @@ class SensorDataParser:
 
             # Parse RSSI from byte 4
             rssi = packet[4]
+            rssi = rssi - 128
 
             # Parse device ID from bytes 7-9 (3 bytes)
             device_id = f"{packet[6]:02x} {packet[7]:02x} {packet[8]:02x} {packet[9]:02x}"
@@ -570,14 +639,18 @@ class SensorDataParser:
             
             # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
             thermo_raw = packet[13]
-            thermo_raw = (thermo_raw << 8) | packet[12]
-            thermo = (thermo_raw * 1.2) / (32 * 2**15)
-            
+            thermo_raw = (thermo_raw << 8) | packet[12] 
+            thermo_uV = raw_to_voltage_uV(thermo_raw)
+            thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
+       
+            #thermo_uV = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
+             # Convert µV -> temperature using provided coefficients
+          
+
+
             # Parse battery voltage from bytes 14-15 (2 bytes, big-endian)
             battery_voltage = ((packet[15] << 8) | packet[14]) / 1000.0
             
-    
-    
             
             if battery_voltage < 0 or battery_voltage > 10:
                 logger.warning(f"Battery voltage out of range: {battery_voltage}")
@@ -587,7 +660,7 @@ class SensorDataParser:
                 device_id=device_id,
                 rtd_resistance=rtd_resistance,
                 rtd_temperature=rtd_temperature,
-                thermocouple=thermo,
+                thermocouple=thermo_temperature_C,
                 battery_voltage=battery_voltage,
                 rssi=rssi,
                 raw_packet=packet
@@ -617,11 +690,15 @@ class SensorGUI(tk.Tk):
         self.state('zoomed')
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
+
+        self.sel = tk.StringVar(value="")
+        self.apply_rtd_compensation = tk.BooleanVar(value=False)  # or IntVar/DoubleVar depending on your need
+
         
         self.port_manager = SerialPortManager()
         self.packet_processor = PacketProcessor()
         self.data_parser = SensorDataParser()
-        
+         # Observable variables
         self.current_temp = tk.StringVar(value="--")
         self.device_id_val = tk.StringVar(value="NOT PAIRED")
         self.rtd_temp = tk.StringVar(value="--")
@@ -630,8 +707,8 @@ class SensorGUI(tk.Tk):
         self.rssi_val = tk.StringVar(value="--")
         self.status_msg = tk.StringVar(value="Ready")
         self.is_reading = False
-        self.is_paired = tk.BooleanVar(value=False)
-        
+        self.is_paired = tk.BooleanVar(value=False)  
+
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
         
@@ -652,17 +729,24 @@ class SensorGUI(tk.Tk):
 class DashboardFrame(tk.Frame):
     """Main dashboard display - Full Screen"""
     
-    def __init__(self, parent, controller):
+    def __init__(self,parent, controller):
         super().__init__(parent, bg="#1a1a1a")
         self.controller = controller
+
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        
+        self.last_battery_alert = 0  # timestamp of last battery warning
+        self.battery_alerted = False  # to prevent repeated popups
+        self.last_thermocouple = None
+        self.rtd_ready = False  # Flag to indicate RTD & TC data is received
+        self.rtd_ready = False
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         header.grid_propagate(False)
-        
+
+        # ===== add ARRDY logo at top-right (insert here, right after header.grid_propagate(False)) =====
+
         # Title and device info (left side)
         left_info = tk.Frame(header, bg="#e6e6e6")
         left_info.pack(side="left", fill="y", padx=30, pady=15)
@@ -675,6 +759,19 @@ class DashboardFrame(tk.Frame):
         tk.Label(device_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
         tk.Label(device_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 12, "bold")).pack(side="left", padx=5)
+             
+        try:
+            original_img = Image.open("arrdy_logo.png")
+            base_height = 60
+            h_percent = (base_height / float(original_img.size[1]))
+            w_size = int((float(original_img.size[0]) * float(h_percent)))
+            resized_img = original_img.resize((w_size, base_height), Image.Resampling.LANCZOS)
+            self.arrdy_logo = ImageTk.PhotoImage(resized_img)
+            logo_label = tk.Label(header, image=self.arrdy_logo, bg="#e6e6e6")
+            logo_label.pack(side="right", anchor="n", padx=10, pady=10)
+        except Exception:
+            tk.Label(header, text="[ARRDY]", bg="#e6e6e6", fg="#884400", font=("Arial", 16, "bold")).pack(side="right", anchor="n", padx=10, pady=10)
+        
         
         # Time and status (center)
         center_info = tk.Frame(header, bg="#e6e6e6")
@@ -696,12 +793,13 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 20, "bold"))
         self.lbl_bat.pack(anchor="e")
         controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}%"))
-        
-        self.lbl_rssi = tk.Label(right_info, text="RSSI --", fg="#0055aa", bg="#e6e6e6", 
+        self.lbl_rssi = tk.Label(right_info, text="SIGNAL STRENGTH(RSSI)", fg="#0055aa", bg="#e6e6e6", 
                 font=("Arial", 20, "bold"))
         self.lbl_rssi.pack(anchor="e")
-        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"RSSI {controller.rssi_val.get()}"))
+        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
         
+        
+       
         # Main content area
         self.main_container = tk.Frame(self, bg="#ffffff")
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
@@ -722,11 +820,12 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
                 font=("Arial", 22, "bold")).pack(pady=(40, 10))
         
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=500, height=200)
         temp_box.pack(pady=20, padx=20)
+        temp_box.pack_propagate(False)
         
-        tk.Label(temp_box, textvariable=controller.current_temp, bg="#d40000", fg="#ffffff", 
-                font=("Arial", 120, "bold"), padx=40, pady=20).pack()
+        tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff", 
+                font=("Arial", 120, "bold"), padx=40, pady=20).pack(expand=True)
         
         tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
         
@@ -745,21 +844,25 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 32, "bold")).pack(pady=10)
         tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
         
-        # Thermocouple sensor
-        thermo_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        thermo_frame.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(thermo_frame, text="THERMOCOUPLE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
-        tk.Label(thermo_frame, textvariable=controller.thermo_val, fg="#cc3300", bg="#ffffff", 
-                font=("Arial", 32, "bold")).pack(pady=10)
-        tk.Label(thermo_frame, text="mV", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
         
+        
+        #TEMPERATURE sensor
+        temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
+        
+        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
+        font=("Arial", 32, "bold")).pack(pady=10)
+
+        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+ 
         # RSSI indicator
-        rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        """rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
         rssi_frame.grid(row=0, column=2, sticky="nsew", padx=10)
         tk.Label(rssi_frame, text="SIGNAL STRENGTH", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
         tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#ccaa00", bg="#ffffff", 
                 font=("Arial", 28, "bold")).pack(pady=10)
-        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()"""
         
         # Footer with controls
         footer = tk.Frame(self, bg="#e6e6e6", height=70)
@@ -777,19 +880,146 @@ class DashboardFrame(tk.Frame):
         # Buttons (center-left)
         btn_frame = tk.Frame(footer, bg="#e6e6e6")
         btn_frame.pack(side="left", padx=10, pady=12)
-        
-        tk.Button(btn_frame, text="🔄 REFRESH", command=self.update_ports, font=("Arial", 10, "bold"), 
-                 width=12, bg="#666666", fg="white").pack(side="left", padx=3)
-        tk.Button(btn_frame, text="✓ CONNECT", command=self._open_port, font=("Arial", 10, "bold"), 
-                 width=12, bg="#009900", fg="white").pack(side="left", padx=3)
-        tk.Button(btn_frame, text="✗ DISCONNECT", command=self._close_port, font=("Arial", 10, "bold"), 
-                 width=14, bg="#cc0000", fg="white").pack(side="left", padx=3)
-        
-        # Settings button (right)
-        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"), 
+        self.btn_refresh = tk.Button(
+            btn_frame, text="🔄 REFRESH", command=self.update_ports,
+            font=("Arial", 10, "bold"), width=12, bg="#666666", fg="white"
+        )
+        self.btn_refresh.pack(side="left", padx=3)
+
+        self.btn_connect = tk.Button(
+            btn_frame, text="✓ CONNECT", command=self._open_port,
+            font=("Arial", 10, "bold"), width=12, bg="#009900", fg="white"
+        )
+        self.btn_connect.pack(side="left", padx=3)
+
+        self.btn_disconnect = tk.Button(
+            btn_frame, text="✗ DISCONNECT", command=self._close_port,
+            font=("Arial", 10, "bold"), width=14, bg="#cc0000", fg="white"
+        )
+        self.btn_disconnect.pack(side="left", padx=3)
+
+         # Settings button (right)
+        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
-        self.update_ports()
+        # Ensure initial button states: connect & refresh enabled, disconnect disabled
+        self.btn_connect.config(state="normal")
+        self.btn_refresh.config(state="normal")
+        self.btn_disconnect.config(state="disabled")
+
+        self.update_ports() 
+         # -------------------------------
+# RTD Compensation Checkbox Setup
+# -------------------------------
+        comp_frame = tk.Frame(footer, bg="#e6e6e6")
+        comp_frame.pack(side="left", padx=10, pady=12)
+
+        tk.Checkbutton(
+         comp_frame,
+         text="Apply RTD Compensation",
+         variable=controller.apply_rtd_compensation,  # should be a tk.BooleanVar()
+         bg="#e6e6e6",
+         command=self.on_rtd_compensation_changed
+        ).pack()
+
+# -------------------------------
+# Callback Function
+# -------------------------------
+    def on_rtd_compensation_changed(self):
+    
+     enabled = self.controller.apply_rtd_compensation.get()  # True/False
+
+    # Read last received sensor values
+     tc = self.last_thermocouple
+     rtd = self.last_rtd
+
+     if tc is None:
+        print("Thermocouple value not available yet")
+        return
+
+    # Calculate compensated temperature if checkbox is ON
+     if enabled and rtd is not None:
+        compensated = tc + rtd
+        print(f"RTD Compensation ON → TC + RTD = {compensated:.2f} °C")
+        self.controller.thermo_val.set(f"{compensated:.1f}")
+     else:
+        print(f"RTD Compensation OFF → TC = {tc:.2f} °C")
+        self.controller.thermo_val.set(f"{tc:.1f}")
+
+    # Send command to hardware
+        self.send_rtd_compensation_command(enabled)
+
+# -------------------------------
+# Hardware Command Function
+# -------------------------------
+    def send_rtd_compensation_command(self, enabled):
+   
+        try:
+          if enabled:
+            cmd = b'RTD_ON\n'   # replace with your device command
+          else:
+            cmd = b'RTD_OFF\n'
+
+        # Send via serial port
+          if hasattr(self.controller, 'serial') and self.controller.serial:
+            self.controller.serial.write(cmd)
+            print(f"Sent command to hardware: {cmd.decode().strip()}")
+          else:
+            print("Serial port not ready. Command not sent.")
+        except Exception as e:
+          print(f"Error sending RTD command: {e}")
+  
+
+    def check_battery(self, battery_text):
+        # expects strings like "3.50V" or "3.5"
+        if not battery_text or battery_text == "--":
+          self.lbl_bat.config(text="BAT --", fg="#333333")
+          self.bat_progress['value'] = 0
+          self.bat_pct_label.config(text="--%", fg="#333333")
+          return
+
+        m = re.search(r"(\d+(?:\.\d+)?)", str(battery_text))
+        if not m:
+          self.lbl_bat.config(text=f"BAT {battery_text}", fg="#333333")
+          return
+
+        voltage = float(m.group(1))
+        # linear map 3.0V->0%  4.2V->100%
+        pct = int(round(100.0 * (voltage - 3.0) / (4.2 - 3.0)))
+        pct = max(0, min(100, pct))
+
+        # update UI
+        self.lbl_bat.config(text=f"BAT {voltage:.2f}V ({pct}%)")
+        try:
+            self.bat_progress['value'] = pct
+        except Exception:
+            pass
+        self.bat_pct_label.config(text=f"{pct}%")
+        # color indicator
+        if voltage >= 3.6:
+         color = "#006600"   # good
+        elif voltage >= 3.0:
+         color = "orange"    # low
+        else:
+         color = "red"       # critical
+
+        self.lbl_bat.config(fg=color)
+        self.bat_pct_label.config(fg=color)
+ 
+        # optional: rate-limited popups for low/critical
+        now = time.time()
+        if voltage < 3.0 and now - getattr(self, "last_battery_alert", 0) > 10:
+            try:
+               messagebox.showerror("Critical Battery", f"Battery critically low ({voltage:.2f}V) - {pct}%")
+            except Exception:
+               pass
+            self.last_battery_alert = now
+        elif 3.0 <= voltage < 3.6 and not getattr(self, "battery_alerted", False):
+            try:
+               messagebox.showwarning("Low Battery", f"Battery low: {voltage:.2f}V ({pct}%)")
+            except Exception:
+             pass
+             self.battery_alerted = True
     
     def update_clock(self):
         """Update time and date"""
@@ -811,12 +1041,22 @@ class DashboardFrame(tk.Frame):
         if not sel:
             messagebox.showerror("Error", "Select a port")
             return
-        
+        self.btn_connect.config(state="disabled")
+        self.btn_refresh.config(state="disabled")
+        self.btn_disconnect.config(state="normal")
+
         success, msg = self.controller.port_manager.open_port(sel)
         if success:
             self.controller.device_id_val.set(sel)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
+            
+            self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
+
+            self.btn_connect.config(state="disabled")
+            self.btn_refresh.config(state="disabled")
+            self.btn_disconnect.config(state="normal")
+
             self._read_data()
         else:
             messagebox.showerror("Error", msg)
@@ -828,6 +1068,11 @@ class DashboardFrame(tk.Frame):
         self.controller.is_paired.set(False)
         self.controller.device_id_val.set("NOT PAIRED")
         self.controller.packet_processor.reset()
+
+         # Restore button states
+        self.btn_connect.config(state="normal")
+        self.btn_refresh.config(state="normal")
+        self.btn_disconnect.config(state="disabled")
     
     def _read_data(self):
         """Read from serial port"""
@@ -845,23 +1090,81 @@ class DashboardFrame(tk.Frame):
         
         if self.controller.is_reading:
             self.after(1, self._read_data)
-    
+
     def _process_data(self, packet):
         """Process sensor data"""
         try:
             data = self.controller.data_parser.parse_packet(packet)
-            
-            # Print room temperature
-           
-            
-            self.controller.current_temp.set(f"{data.temperature:.1f}")
-            self.controller.device_id_val.set(data.device_id)
-            self.controller.rtd_temp.set(str(data.rtd_temperature))
-            self.controller.thermo_val.set(str(data.thermocouple))
-            self.controller.battery_val.set(f"{data.battery_voltage:.2f}V")
-            self.controller.rssi_val.set(f"RSSI: {data.rssi} dBm")
         except ValueError as e:
-            logger.error(f"Parse error: {e}")
+            logger.error("Parse error: %s", e)
+            return
+        except Exception:
+            logger.exception("Unexpected error while parsing packet")
+            return
+
+        # Safely extract fields
+        self.last_thermocouple = getattr(data, "thermocouple", None)
+        self.last_rtd = getattr(data, "rtd_temperature", None)
+
+        if not self.rtd_ready and self.last_thermocouple is not None and self.last_rtd is not None:
+            self.rtd_ready = True
+            logger.info("RTD data is ready — you can now apply compensation")
+            logger.info("Received Sensor Data → TC: %s, RTD: %s, Battery: %s",
+                        data.thermocouple, data.rtd_temperature, getattr(data, "battery_voltage", None))
+
+        # Update UI fields
+        try:
+            temp = getattr(data, "temperature", None)
+            self.controller.current_temp.set(f"{temp:.1f}" if temp is not None else "--")
+        except Exception:
+            self.controller.current_temp.set("--")
+
+        if getattr(data, "device_id", None):
+            self.controller.device_id_val.set(data.device_id)
+
+        try:
+            rtd_val = getattr(data, "rtd_temperature", None)
+            self.controller.rtd_temp.set(f"{rtd_val:.1f}" if rtd_val is not None else "--")
+        except Exception:
+            self.controller.rtd_temp.set("--")
+
+        tc = getattr(data, "thermocouple", None)
+        if tc is not None:
+            self.controller.thermo_val.set(f"{tc:.1f}")
+        else:
+            self.controller.thermo_val.set("--")
+            logger.error("Thermocouple value is None (out-of-range voltage or bad data)")
+
+        # Battery: accept battery_voltage (float) or battery_text
+        batt = getattr(data, "battery_voltage", None)
+        if batt is None:
+            batt_text = getattr(data, "battery_text", None)
+            if batt_text:
+                m = re.search(r"(\d+(?:\.\d+)?)", str(batt_text))
+                if m:
+                    try:
+                        batt = float(m.group(1))
+                    except Exception:
+                        batt = None
+
+        if batt is not None:
+            self.controller.battery_val.set(f"{batt:.2f}V")
+        else:
+            # keep previous value or set to "--"
+            self.controller.battery_val.set("--")
+
+        # RSSI
+        rssi = getattr(data, "rssi", None)
+        if rssi is not None:
+            try:
+                self.controller.rssi_val.set(f"{float(rssi):.0f} dBm")
+            except Exception:
+                self.controller.rssi_val.set(str(rssi))
+        else:
+            # if parser gives no rssi, keep existing value
+            if self.controller.rssi_val.get() == "":
+                self.controller.rssi_val.set("--")
+       
     
     def check_password(self):
         """Check password"""
@@ -931,18 +1234,8 @@ class SettingsFrame(tk.Frame):
         
         tab2_content = tk.Frame(tab2, bg="#f0f0f0")
         tab2_content.pack(fill="both", expand=True, padx=30, pady=30)
-        
-        # Temperature
-        tk.Label(tab2_content, text="Melt Temperature", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 10))
-        
-        temp_box = tk.Frame(tab2_content, bg="#ffeeee", relief="ridge", borderwidth=2)
-        temp_box.pack(fill="x", pady=10)
-        
-        tk.Label(temp_box, textvariable=controller.current_temp, fg="#d40000", bg="#ffeeee", 
-                font=("Arial", 20, "bold")).pack(padx=15, pady=10)
-        
-        # RTD
+
+        #RTD
         tk.Label(tab2_content, text="RTD Temperature", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(20, 10))
         
@@ -952,7 +1245,7 @@ class SettingsFrame(tk.Frame):
         tk.Label(rtd_box, textvariable=controller.rtd_temp, fg="#0066cc", bg="#eef0ff", 
                 font=("Arial", 20, "bold")).pack(padx=15, pady=10)
         
-        # Battery
+       #Battery
         tk.Label(tab2_content, text="Battery Status", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(20, 10))
         
@@ -962,7 +1255,7 @@ class SettingsFrame(tk.Frame):
         tk.Label(battery_box, textvariable=controller.battery_val, fg="#ccaa00", bg="#ffffee", 
                 font=("Arial", 18, "bold")).pack(padx=15, pady=10)
         
-        # System Info Tab
+        #System Info Tab
         tab3 = tk.Frame(nb, bg="#f0f0f0")
         nb.add(tab3, text="System Information")
         
