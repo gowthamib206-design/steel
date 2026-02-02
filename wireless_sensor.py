@@ -820,7 +820,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
                 font=("Arial", 22, "bold")).pack(pady=(40, 10))
         
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=400, height=200)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=500, height=200)
         temp_box.pack(pady=20, padx=20)
         temp_box.pack_propagate(False)
         
