@@ -6,6 +6,7 @@ Modern UI based on ACUCAST reference
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
+from tkinter.filedialog import Open
 from PIL import Image, ImageTk
 import serial
 import serial.tools.list_ports
@@ -775,6 +776,8 @@ class DashboardFrame(tk.Frame):
         self.last_thermocouple = None
         self.rtd_ready = False  # Flag to indicate RTD & TC data is received
         self.rtd_ready = False
+        self.tc_fifo = []   # FIFO buffer for thermocouple averaging
+
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
@@ -796,18 +799,6 @@ class DashboardFrame(tk.Frame):
         tk.Label(device_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
         tk.Label(device_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 12, "bold")).pack(side="left", padx=5)
-             
-        try:
-            original_img = Image.open("arrdy_logo.png")
-            base_height = 60
-            h_percent = (base_height / float(original_img.size[1]))
-            w_size = int((float(original_img.size[0]) * float(h_percent)))
-            resized_img = original_img.resize((w_size, base_height), Image.Resampling.LANCZOS)
-            self.arrdy_logo = ImageTk.PhotoImage(resized_img)
-            logo_label = tk.Label(header, image=self.arrdy_logo, bg="#e6e6e6")
-            logo_label.pack(side="right", anchor="n", padx=10, pady=10)
-        except Exception:
-            tk.Label(header, text="[ARRDY]", bg="#e6e6e6", fg="#884400", font=("Arial", 16, "bold")).pack(side="right", anchor="n", padx=10, pady=10)
         
         
         # Time and status (center)
@@ -909,45 +900,11 @@ class DashboardFrame(tk.Frame):
         footer.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
         footer.grid_propagate(False)
         
-        # Port controls (left)
-        port_frame = tk.Frame(footer, bg="#e6e6e6")
-        port_frame.pack(side="left", padx=20, pady=12)
-        
-        tk.Label(port_frame, text="USB Port:", fg="#333333", bg="#e6e6e6", font=("Arial", 11, "bold")).pack(side="left", padx=5)
-        self.combo = ttk.Combobox(port_frame, width=20, state="readonly", font=("Arial", 10))
-        self.combo.pack(side="left", padx=10)
-        
-        # Buttons (center-left)
-        btn_frame = tk.Frame(footer, bg="#e6e6e6")
-        btn_frame.pack(side="left", padx=10, pady=12)
-        self.btn_refresh = tk.Button(
-            btn_frame, text="🔄 REFRESH", command=self.update_ports,
-            font=("Arial", 10, "bold"), width=12, bg="#666666", fg="white"
-        )
-        self.btn_refresh.pack(side="left", padx=3)
-
-        self.btn_connect = tk.Button(
-            btn_frame, text="✓ CONNECT", command=self._open_port,
-            font=("Arial", 10, "bold"), width=12, bg="#009900", fg="white"
-        )
-        self.btn_connect.pack(side="left", padx=3)
-
-        self.btn_disconnect = tk.Button(
-            btn_frame, text="✗ DISCONNECT", command=self._close_port,
-            font=("Arial", 10, "bold"), width=14, bg="#cc0000", fg="white"
-        )
-        self.btn_disconnect.pack(side="left", padx=3)
 
          # Settings button (right)
         tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
-        # Ensure initial button states: connect & refresh enabled, disconnect disabled
-        self.btn_connect.config(state="normal")
-        self.btn_refresh.config(state="normal")
-        self.btn_disconnect.config(state="disabled")
-
-        self.update_ports() 
          # -------------------------------
 # RTD Compensation Checkbox Setup
 # -------------------------------
@@ -1067,6 +1024,43 @@ class DashboardFrame(tk.Frame):
         self.lbl_time.config(text=now.strftime("%H:%M:%S"))
         self.lbl_date.config(text=now.strftime("%d-%b-%Y"))
         self.after(1000, self.update_clock)
+
+    def _open_port(self):
+        """Open selected port (combo must be set by ConnectionSettings before calling)."""
+        sel = getattr(self, "combo", None)
+        port_name = None
+        if sel:
+            port_name = sel.get()
+        if not port_name:
+            messagebox.showerror("Error", "Select a port")
+            return
+        # call the controller's port manager
+        success, msg = self.controller.port_manager.open_port(port_name)
+        if success:
+            self.controller.device_id_val.set(port_name)
+            self.controller.is_paired.set(True)
+            self.controller.is_reading = True
+            # store a reference to serial if available
+            self.controller.serial = self.controller.port_manager.serial
+            self.controller.status_msg.set("Connected")
+            # send RTD setting on connect
+            self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
+            # start read loop (non-blocking)
+            self._read_data()
+            messagebox.showinfo("Connected", msg)
+        else:
+            messagebox.showerror("Error", msg)
+
+    def _close_port(self):
+        self.controller.port_manager.close_port()
+        self.controller.is_reading = False
+        self.controller.is_paired.set(False)
+        self.controller.device_id_val.set("NOT PAIRED")
+        self.controller.packet_processor.reset()
+        self.controller.serial = None
+        self.controller.status_msg.set("Disconnected")
+        messagebox.showinfo("Disconnected", "Port closed")
+
     
     def update_ports(self):
         """Update available ports"""
@@ -1171,7 +1165,7 @@ class DashboardFrame(tk.Frame):
         except Exception:
             self.controller.rtd_temp.set("--")
 
-        tc = getattr(data, "thermocouple", None)
+        """tc = getattr(data, "thermocouple", None)
         tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
         
         if tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
@@ -1181,7 +1175,38 @@ class DashboardFrame(tk.Frame):
             self.controller.thermo_val.set(f"{tc:.1f}")
         else:
             self.controller.thermo_val.set("--")
-            logger.error("Thermocouple value is None (out-of-range voltage or bad data)")
+            logger.error("Thermocouple value is None (out-of-range voltage or bad data)")"""
+
+        tc = getattr(data, "thermocouple", None)
+        tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
+
+# Exception conditions → bypass averaging
+        if tc_voltage_uv is not None and (
+        tc_voltage_uv < 100 or tc_voltage_uv > 1800):
+    
+         self.tc_fifo.clear()  # reset FIFO
+         self.controller.thermo_val.set("--")
+         logger.error("Thermocouple voltage out of range")
+
+# Special connected state
+        elif tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
+         self.tc_fifo.clear()
+         self.controller.thermo_val.set("CONNECTED")
+
+# Normal condition → FIFO averaging
+        elif tc is not None:
+         self.tc_fifo.append(tc)
+
+        if len(self.tc_fifo) > 10:
+          self.tc_fifo.pop(0)  # FIFO remove oldest
+
+          avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
+          self.controller.thermo_val.set(f"{avg_tc:.1f}")
+
+        else:
+          self.tc_fifo.clear()
+          self.controller.thermo_val.set("--")
+
 
         # Battery: accept battery_voltage (float) or battery_text
         batt = getattr(data, "battery_voltage", None)
@@ -1263,13 +1288,151 @@ class DashboardFrame(tk.Frame):
             self.controller.status_msg.set("Normal")
             self.lbl_status.config(fg="green")
    
+    #def check_password(self):
+       # """Check password"""
+        #password = simpledialog.askstring("Security", "Enter Password:", show='*')
+        #if password == "1111":
+           # self.controller.show_frame("SettingsFrame")
+        #elif password is not None:
+            #messagebox.showerror("Access Denied", "Wrong Password")
+
     def check_password(self):
-        """Check password"""
-        password = simpledialog.askstring("Security", "Enter Password:", show='*')
-        if password == "1111":
-            self.controller.show_frame("SettingsFrame")
-        elif password is not None:
-            messagebox.showerror("Access Denied", "Wrong Password")
+        """Open Connection Settings popup safely"""
+        try:
+          ConnectionSettings(
+            controller=self.controller,
+            dashboard=self
+        )
+        except Exception as e:
+          logger.exception("Failed to open ConnectionSettings")
+          messagebox.showerror(
+            "Error",
+            f"Unable to open connection settings:\n{e}"
+        )
+
+
+class ConnectionSettings(tk.Toplevel):
+    """COM Port Configuration Popup — opens immediately, requests password, enables controls on success."""
+
+    def __init__(self, controller, dashboard):
+        super().__init__(dashboard)
+
+        self.controller = controller
+        self.dashboard = dashboard
+
+        self.title("Connection Settings")
+        self.geometry("420x250")
+        self.resizable(False, False)
+        self.configure(bg="#f0f0f0")
+
+        self.transient(dashboard)
+        self.grab_set()
+
+        # ---------- TITLE ----------
+        tk.Label(
+            self,
+            text="USB / COM Port Configuration",
+            font=("Arial", 14, "bold"),
+            bg="#f0f0f0"
+        ).pack(pady=15)
+
+        # ---------- PORT SELECTION ----------
+        frame = tk.Frame(self, bg="#f0f0f0")
+        frame.pack(pady=10)
+
+        tk.Label(frame, text="USB Port:", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+
+        self.combo = ttk.Combobox(frame, width=20, state="readonly")
+        self.combo.pack(side="left", padx=10)
+
+        # ---------- BUTTONS ----------
+        btns = tk.Frame(self, bg="#f0f0f0")
+        btns.pack(pady=20)
+
+        # create buttons as attributes so we can enable/disable them
+        self.btn_refresh = tk.Button(
+            btns,
+            text="🔄 REFRESH",
+            width=12,
+            command=self.update_ports,
+            state="disabled"
+        )
+        self.btn_refresh.pack(side="left", padx=5)
+
+        self.btn_connect = tk.Button(
+            btns,
+            text="✓ CONNECT",
+            width=12,
+            command=self.connect,
+            state="disabled"
+        )
+        self.btn_connect.pack(side="left", padx=5)
+
+        self.btn_disconnect = tk.Button(
+            btns,
+            text="✗ DISCONNECT",
+            width=12,
+            command=self.disconnect,
+            state="disabled"
+        )
+        self.btn_disconnect.pack(side="left", padx=5)
+
+        # small status / instruction area
+        self.status_label = tk.Label(self, text="Locked — enter password to enable controls", bg="#f0f0f0")
+        self.status_label.pack(pady=(0, 8))
+
+        # populate combo (disabled until password)
+        self.update_ports()
+
+        # Ensure popup is shown before the password dialog
+        self.lift()
+        self.after(100, self.ask_password)  # call after short delay so the Toplevel is visible
+
+    def update_ports(self):
+        ports = self.controller.port_manager.get_available_ports()
+        self.combo["values"] = ports if ports else []
+        if ports:
+            try:
+                self.combo.current(0)
+            except Exception:
+                pass
+
+    def ask_password(self):
+        """Prompt for password; enable controls only if correct."""
+        pwd = simpledialog.askstring("Security", "Enter Password:", show='*', parent=self)
+        if pwd == "1111":
+            self.enable_controls()
+        elif pwd is None:
+            # user cancelled — keep controls disabled
+            self.status_label.config(text="Locked — password required", fg="black")
+        else:
+            messagebox.showerror("Access Denied", "Wrong Password", parent=self)
+            self.status_label.config(text="Wrong password — controls locked", fg="red")
+
+    def enable_controls(self):
+        self.btn_refresh.config(state="normal")
+        self.btn_connect.config(state="normal")
+        self.btn_disconnect.config(state="normal")
+        self.status_label.config(text="Unlocked — you may connect", fg="green")
+        # refresh port list now that controls are enabled
+        self.update_ports()
+
+    def connect(self):
+        port = self.combo.get()
+        if not port:
+            messagebox.showerror("Error", "Select a COM port", parent=self)
+            return
+
+        # Call dashboard logic
+        # Keep compatibility with DashboardFrame._open_port which expects self.dashboard.combo
+        self.dashboard.combo = self.combo
+        self.dashboard._open_port()
+
+        # If you want to close the popup after successful connect, uncomment:
+        # self.destroy()
+
+    def disconnect(self):
+        self.dashboard._close_port()
 
 
 class SettingsFrame(tk.Frame):
@@ -1372,18 +1535,14 @@ class SettingsFrame(tk.Frame):
                 font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
     
     def check_password_for_exit(self):
-        """Verify password before exiting settings"""
+        
         password = simpledialog.askstring("Confirm", "Enter Password to Confirm:", show='*')
         if password == "1111":
             self.exit_settings()
         elif password is not None:
             messagebox.showerror("Access Denied", "Wrong Password")
     
-    def exit_settings(self):
-        """Exit settings"""
-        self.controller.show_frame("DashboardFrame")
-
-
+    
 def main():
     """Main entry point"""
     app = SensorGUI()
