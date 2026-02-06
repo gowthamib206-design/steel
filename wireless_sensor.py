@@ -453,8 +453,9 @@ class SerialPortManager:
     """Manages serial port operations"""
     
     def __init__(self):
-        self.ser: Optional[serial.Serial] = None
-        self.is_open = False
+         self.serial = None          # ✅ ADD THIS LINE
+         self.is_open = False
+       
     
     def get_available_ports(self) -> List[str]:
         """Get list of available serial ports"""
@@ -503,12 +504,10 @@ class SerialPortManager:
     def close_port(self) -> Tuple[bool, str]:
         """Close serial port"""
         try:
-            if self.ser and self.is_open:
-                self.ser.close()
-                self.is_open = False
-                success_msg = "Port closed successfully"
-                logger.info(success_msg)
-                return True, success_msg
+            if self.serial and self.serial.is_open:
+             self.serial.close()
+             self.serial = None
+             self.is_open = False
             else:
                 error_msg = "Port is not open"
                 logger.warning(error_msg)
@@ -774,6 +773,8 @@ class DashboardFrame(tk.Frame):
         self.last_battery_alert = 0  # timestamp of last battery warning
         self.battery_alerted = False  # to prevent repeated popups
         self.last_thermocouple = None
+        self.last_rtd = None   # ✅ ADD
+
         self.rtd_ready = False  # Flag to indicate RTD & TC data is received
         self.rtd_ready = False
         self.tc_fifo = []   # FIFO buffer for thermocouple averaging
@@ -1088,86 +1089,65 @@ class DashboardFrame(tk.Frame):
             self.after(1, self._read_data)
 
     def _process_data(self, packet):
-        """Process sensor data"""
-        try:
-            data = self.controller.data_parser.parse_packet(packet)
-        except ValueError as e:
-            logger.error("Parse error: %s", e)
-            return
-        except Exception:
-            logger.exception("Unexpected error while parsing packet")
-            return
+        """Process sensor data and update UI"""
 
-        # Safely extract fields
+    # -------- PARSE DATA --------
+        try:
+           data = self.controller.data_parser.parse_packet(packet)
+        except Exception:
+           return   # Exit only if parsing completely fails
+        
+        # -------- DEVICE TEMPERATURE --------
+        device_temp = getattr(data, "temperature", None)
+        if device_temp is not None:
+           self.controller.current_temp.set(f"{device_temp:.1f}")
+        else:
+          self.controller.current_temp.set("--")
+    # -------- RTD TEMPERATURE --------
+        rtd_temp = getattr(data, "rtd_temperature", None)
+        if rtd_temp is not None:
+          self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
+        else:
+          self.controller.rtd_temp.set("--")
+
+    # -------- SAVE LAST VALUES (FOR COMPENSATION) --------
         self.last_thermocouple = getattr(data, "thermocouple", None)
-        self.last_rtd = getattr(data, "rtd_temperature", None)
+        self.last_rtd = rtd_temp
 
         if not self.rtd_ready and self.last_thermocouple is not None and self.last_rtd is not None:
-            self.rtd_ready = True
-            logger.info("RTD data is ready — you can now apply compensation")
-            logger.info("Received Sensor Data → TC: %s, RTD: %s, Battery: %s",
-                        data.thermocouple, data.rtd_temperature, getattr(data, "battery_voltage", None))
+          self.rtd_ready = True
+
 
         # Check for alerts
         self._check_alerts(data)
 
         # Update UI fields
-        try:
-            temp = getattr(data, "temperature", None)
-            self.controller.current_temp.set(f"{temp:.1f}" if temp is not None else "--")
-        except Exception:
-            self.controller.current_temp.set("--")
-
-        if getattr(data, "device_id", None):
-            self.controller.device_id_val.set(data.device_id)
-
-        try:
-            rtd_val = getattr(data, "rtd_temperature", None)
-            self.controller.rtd_temp.set(f"{rtd_val:.1f}" if rtd_val is not None else "--")
-        except Exception:
-            self.controller.rtd_temp.set("--")
-
-        """tc = getattr(data, "thermocouple", None)
-        tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
-        
-        if tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
-            # Special case: show "Thermo is connected" instead of temperature
-            self.controller.thermo_val.set("CONNECTED")
-        elif tc is not None:
-            self.controller.thermo_val.set(f"{tc:.1f}")
-        else:
-            self.controller.thermo_val.set("--")
-            logger.error("Thermocouple value is None (out-of-range voltage or bad data)")"""
-
+        # -------------------------------
+# Thermocouple handling (FIXED)
+# -------------------------------
         tc = getattr(data, "thermocouple", None)
         tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
 
-# Exception conditions → bypass averaging
-        if tc_voltage_uv is not None and (
-        tc_voltage_uv < 100 or tc_voltage_uv > 1800):
-    
-         self.tc_fifo.clear()  # reset FIFO
-         self.controller.thermo_val.set("--")
-         logger.error("Thermocouple voltage out of range")
+         # Out of range → invalid
+        if tc_voltage_uv is not None and (tc_voltage_uv < 100 or tc_voltage_uv > 14000):
+            self.tc_fifo.clear()
+            self.controller.thermo_val.set("INVALID")
 
-# Special connected state
+# Connected but no temperature yet
         elif tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
-         self.tc_fifo.clear()
-         self.controller.thermo_val.set("CONNECTED")
+            self.tc_fifo.clear()
+            self.controller.thermo_val.set("THERMO CONNECTED")
 
-# Normal condition → FIFO averaging
+# Valid thermocouple temperature
         elif tc is not None:
-         self.tc_fifo.append(tc)
+            self.tc_fifo.append(tc)
 
-        if len(self.tc_fifo) > 10:
-          self.tc_fifo.pop(0)  # FIFO remove oldest
+            if len(self.tc_fifo) > 10:
+                self.tc_fifo.pop(0)
 
-          avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
-          self.controller.thermo_val.set(f"{avg_tc:.1f}")
+            avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
+            self.controller.thermo_val.set(f"{avg_tc:.1f}")
 
-        else:
-          self.tc_fifo.clear()
-          self.controller.thermo_val.set("--")
 
 
         # Battery: accept battery_voltage (float) or battery_text
