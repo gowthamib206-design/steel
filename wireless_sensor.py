@@ -1069,44 +1069,6 @@ class DashboardFrame(tk.Frame):
         if ports:
             self.combo.current(0)
     
-    def _open_port(self):
-        """Open selected port"""
-        sel = self.combo.get()
-        if not sel:
-            messagebox.showerror("Error", "Select a port")
-            return
-        self.btn_connect.config(state="disabled")
-        self.btn_refresh.config(state="disabled")
-        self.btn_disconnect.config(state="normal")
-
-        success, msg = self.controller.port_manager.open_port(sel)
-        if success:
-            self.controller.device_id_val.set(sel)
-            self.controller.is_paired.set(True)
-            self.controller.is_reading = True
-            
-            self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
-
-            self.btn_connect.config(state="disabled")
-            self.btn_refresh.config(state="disabled")
-            self.btn_disconnect.config(state="normal")
-
-            self._read_data()
-        else:
-            messagebox.showerror("Error", msg)
-    
-    def _close_port(self):
-        """Close port"""
-        self.controller.port_manager.close_port()
-        self.controller.is_reading = False
-        self.controller.is_paired.set(False)
-        self.controller.device_id_val.set("NOT PAIRED")
-        self.controller.packet_processor.reset()
-
-         # Restore button states
-        self.btn_connect.config(state="normal")
-        self.btn_refresh.config(state="normal")
-        self.btn_disconnect.config(state="disabled")
     
     def _read_data(self):
         """Read from serial port"""
