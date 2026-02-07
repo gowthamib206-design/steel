@@ -1,0 +1,4 @@
+build
+dist
+wireless_sensor.spec
+__pycache__/
