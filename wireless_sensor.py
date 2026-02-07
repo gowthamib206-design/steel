@@ -1317,41 +1317,7 @@ class ConnectionSettings(tk.Toplevel):
        )
         self.combo.pack(side="left", padx=5)
 
-      # CONNECT button beside USB
-        self.btn_connect = tk.Button(
-          frame,
-           text="✓ CONNECT",
-            width=10,
-           command=self.connect,
-           state="disabled"
-       )
-        self.btn_connect.pack(side="left", padx=5)
 
-        tx_frame = tk.Frame(self, bg="#f0f0f0")
-        tx_frame.pack(pady=(5, 10))
-
-        tk.Label(
-        tx_frame,
-        text="Transmitter ID:",
-        bg="#f0f0f0",
-        font=("Arial", 11)
-        ).pack(side="left", padx=5)
-
-        self.tx_combo = ttk.Combobox(
-         tx_frame,
-         width=20,
-         state="readonly"
-        )
-        self.tx_combo.pack(side="left", padx=5)
-
-        # Storage
-        self.tx_ids = []
-        self.selected_tx = None
-
-        self.tx_combo.bind(
-            "<<ComboboxSelected>>",
-              lambda e: setattr(self, "selected_tx", self.tx_combo.get())
-        )
 
         # ---------- BUTTONS ----------
         btns = tk.Frame(self, bg="#f0f0f0")
@@ -1367,14 +1333,14 @@ class ConnectionSettings(tk.Toplevel):
         )
         self.btn_refresh.pack(side="left", padx=5)
 
-        """self.btn_connect = tk.Button(
+        self.btn_connect = tk.Button(
             btns,
             text="✓ CONNECT",
             width=12,
             command=self.connect,
             state="disabled"
         )
-        self.btn_connect.pack(side="left", padx=5)"""
+        self.btn_connect.pack(side="left", padx=5)
 
         self.btn_disconnect = tk.Button(
             btns,
@@ -1384,6 +1350,34 @@ class ConnectionSettings(tk.Toplevel):
             state="disabled"
         )
         self.btn_disconnect.pack(side="left", padx=5)
+
+        # ---------- TRANSMITTER ID ----------
+        tx_frame = tk.Frame(self, bg="#f0f0f0")
+        tx_frame.pack(pady=(5, 10))
+
+        tk.Label(
+        tx_frame,
+        text="Transmitter ID:",
+        bg="#f0f0f0",
+        font=("Arial", 11)
+        ).pack(side="left", padx=5)
+
+        self.tx_combo = ttk.Combobox(
+        tx_frame,
+        width=20,
+        state="readonly"
+    )
+        self.tx_combo.pack(side="left", padx=5)
+
+        self.tx_ids = []
+        self.selected_tx = None
+
+        self.tx_combo.bind(
+            "<<ComboboxSelected>>",
+        self.on_tx_selected
+    )
+
+
 
         # small status / instruction area
         self.status_label = tk.Label(self, text="Locked — enter password to enable controls", bg="#f0f0f0")
@@ -1438,6 +1432,11 @@ class ConnectionSettings(tk.Toplevel):
 
         # If you want to close the popup after successful connect, uncomment:
         # self.destroy()
+
+    def on_tx_selected(self, event):
+        self.selected_tx = self.tx_combo.get()
+        self.controller.device_id_val.set(self.selected_tx)
+
 
     def disconnect(self):
         self.dashboard._close_port()
