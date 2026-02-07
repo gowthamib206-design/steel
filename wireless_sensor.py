@@ -1094,6 +1094,25 @@ class DashboardFrame(tk.Frame):
     # -------- PARSE DATA --------
         try:
            data = self.controller.data_parser.parse_packet(packet)
+           # ===============================
+# TRANSMITTER DISCOVERY
+# ===============================
+           tx_id = getattr(data, "device_id", None)
+
+           conn = getattr(self, "connection_window", None)
+
+           if conn and tx_id:
+            tx_id = str(tx_id)
+
+            if tx_id not in conn.tx_ids:
+              conn.tx_ids.append(tx_id)
+              conn.tx_combo["values"] = conn.tx_ids
+
+        # Auto-select first TX
+              if len(conn.tx_ids) == 1:
+               conn.tx_combo.current(0)
+               conn.selected_tx = tx_id
+
         except Exception:
            return   # Exit only if parsing completely fails
         
@@ -1241,10 +1260,12 @@ class DashboardFrame(tk.Frame):
     def check_password(self):
         """Open Connection Settings popup safely"""
         try:
-          ConnectionSettings(
-            controller=self.controller,
-            dashboard=self
-        )
+          
+          self.connection_window = ConnectionSettings(
+           controller=self.controller,
+           dashboard=self
+         )
+
         except Exception as e:
           logger.exception("Failed to open ConnectionSettings")
           messagebox.showerror(
@@ -1278,14 +1299,59 @@ class ConnectionSettings(tk.Toplevel):
             bg="#f0f0f0"
         ).pack(pady=15)
 
-        # ---------- PORT SELECTION ----------
         frame = tk.Frame(self, bg="#f0f0f0")
         frame.pack(pady=10)
 
-        tk.Label(frame, text="USB Port:", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        tk.Label(
+          frame,
+          text="USB Port:",
+           bg="#f0f0f0",
+          font=("Arial", 11)
+        ).pack(side="left", padx=5)
 
-        self.combo = ttk.Combobox(frame, width=20, state="readonly")
-        self.combo.pack(side="left", padx=10)
+        # USB dropdown
+        self.combo = ttk.Combobox(
+          frame,
+          width=20,
+          state="readonly"
+       )
+        self.combo.pack(side="left", padx=5)
+
+      # CONNECT button beside USB
+        self.btn_connect = tk.Button(
+          frame,
+           text="✓ CONNECT",
+            width=10,
+           command=self.connect,
+           state="disabled"
+       )
+        self.btn_connect.pack(side="left", padx=5)
+
+        tx_frame = tk.Frame(self, bg="#f0f0f0")
+        tx_frame.pack(pady=(5, 10))
+
+        tk.Label(
+        tx_frame,
+        text="Transmitter ID:",
+        bg="#f0f0f0",
+        font=("Arial", 11)
+        ).pack(side="left", padx=5)
+
+        self.tx_combo = ttk.Combobox(
+         tx_frame,
+         width=20,
+         state="readonly"
+        )
+        self.tx_combo.pack(side="left", padx=5)
+
+        # Storage
+        self.tx_ids = []
+        self.selected_tx = None
+
+        self.tx_combo.bind(
+            "<<ComboboxSelected>>",
+              lambda e: setattr(self, "selected_tx", self.tx_combo.get())
+        )
 
         # ---------- BUTTONS ----------
         btns = tk.Frame(self, bg="#f0f0f0")
@@ -1301,14 +1367,14 @@ class ConnectionSettings(tk.Toplevel):
         )
         self.btn_refresh.pack(side="left", padx=5)
 
-        self.btn_connect = tk.Button(
+        """self.btn_connect = tk.Button(
             btns,
             text="✓ CONNECT",
             width=12,
             command=self.connect,
             state="disabled"
         )
-        self.btn_connect.pack(side="left", padx=5)
+        self.btn_connect.pack(side="left", padx=5)"""
 
         self.btn_disconnect = tk.Button(
             btns,
@@ -1375,6 +1441,13 @@ class ConnectionSettings(tk.Toplevel):
 
     def disconnect(self):
         self.dashboard._close_port()
+
+
+        # Clear TX dropdown
+        self.tx_ids.clear()
+        self.tx_combo["values"] = []
+        self.selected_tx = None
+
 
 
 class SettingsFrame(tk.Frame):
