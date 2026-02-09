@@ -815,9 +815,6 @@ class DashboardFrame(tk.Frame):
         self.lbl_date = tk.Label(center_info, text="DD-MMM-YYYY", fg="#666666", bg="#e6e6e6", 
                                 font=("Arial", 11))
         self.lbl_date.pack()
-        self.lbl_status = tk.Label(center_info, textvariable=controller.status_msg, fg="#333333", bg="#e6e6e6", 
-                                font=("Arial", 12, "bold"))
-        self.lbl_status.pack(pady=(5, 0))
         self.update_clock()
         
         # Battery and RSSI (right side)
@@ -851,45 +848,51 @@ class DashboardFrame(tk.Frame):
         # Centered temperature section
         center_frame = tk.Frame(temp_display_area, bg="#ffffff")
         center_frame.grid(row=0, column=0, sticky="nsew")
+        center_frame.grid_rowconfigure(0, weight=0)
+        center_frame.grid_rowconfigure(1, weight=0)
+        center_frame.grid_rowconfigure(2, weight=0)
+        center_frame.grid_rowconfigure(3, weight=0)
+        center_frame.grid_columnconfigure(0, weight=1)
         
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
-                font=("Arial", 22, "bold")).pack(pady=(40, 10))
+                font=("Arial", 18, "bold")).grid(row=0, column=0, pady=(20, 10))
         
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=600, height=300)
-        temp_box.pack(pady=20, padx=20)
-        temp_box.pack_propagate(False)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
+        temp_box.grid(row=1, column=0, pady=10, padx=20)
         
         tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff", 
-                font=("Arial", 120, "bold"), padx=40, pady=20).pack(expand=True)
+                font=("Arial", 72, "bold"), padx=20, pady=15).pack()
         
-        tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 40, "bold")).pack()
+        # Temperature unit
+        tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 24, "bold")).grid(row=2, column=0, pady=(0, 10))
+        
+        # Status/Warning label below temperature
+        self.lbl_status = tk.Label(center_frame, textvariable=controller.status_msg, fg="#333333", bg="#ffffff", 
+                                font=("Arial", 12, "bold"), wraplength=700, justify="center")
+        self.lbl_status.grid(row=3, column=0, pady=(0, 15), padx=20, sticky="ew")
         
         # Sensor data grid (RTD, Thermocouple, RSSI)
         sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
-        sensor_frame.grid(row=1, column=0, sticky="ew", pady=30, padx=20)
+        sensor_frame.grid(row=1, column=0, sticky="ew", pady=20, padx=20)
         sensor_frame.grid_columnconfigure(0, weight=1)
         sensor_frame.grid_columnconfigure(1, weight=1)
-        sensor_frame.grid_columnconfigure(2, weight=1)
         
         # RTD sensor
         rtd_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        rtd_frame.grid(row=0, column=0, sticky="nsew", padx=10)
-        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
+        rtd_frame.grid(row=0, column=0, sticky="ew", padx=10)
+        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack()
         tk.Label(rtd_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff", 
-                font=("Arial", 32, "bold")).pack(pady=10)
-        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
+                font=("Arial", 26, "bold")).pack(pady=8)
+        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 13)).pack()
         
-        
-        
-        #TEMPERATURE sensor
+        # TEMPERATURE sensor
         temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
+        temp_frame.grid(row=0, column=1, sticky="ew", padx=10)
         
-        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack(anchor='e')
+        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack()
         tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
-        font=("Arial", 32, "bold")).pack(pady=10, anchor='e')
-
-        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack(anchor='e')
+        font=("Arial", 26, "bold")).pack(pady=8)
+        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 13)).pack()
  
         # RSSI indicator
         """rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
@@ -909,9 +912,9 @@ class DashboardFrame(tk.Frame):
         tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
-         # -------------------------------
-# RTD Compensation Checkbox Setup
-# -------------------------------
+        # -------------------------------
+        # RTD Compensation Checkbox Setup
+        # -------------------------------
         comp_frame = tk.Frame(footer, bg="#e6e6e6")
         comp_frame.pack(side="left", padx=10, pady=12)
 
@@ -923,9 +926,6 @@ class DashboardFrame(tk.Frame):
          command=self.on_rtd_compensation_changed
         ).pack()
 
-# -------------------------------
-# Callback Function
-# -------------------------------
     def on_rtd_compensation_changed(self):
     
      enabled = self.controller.apply_rtd_compensation.get()  # True/False
