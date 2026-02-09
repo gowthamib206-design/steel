@@ -382,6 +382,39 @@ class ThermocoupleTable:
         except Exception as e:
             logger.error(f"Error converting thermocouple voltage to temperature: {e}")
             raise ValueError(f"Failed to convert thermocouple voltage: {e}")
+    
+    @classmethod
+    def get_voltage_from_temperature(cls, temperature: int) -> float:
+        """Convert RTD temperature to thermocouple voltage (mV) using lookup table.
+        
+        This is used for RTD compensation: we look up the RTD temperature in the
+        thermocouple table to find the corresponding millivolts, which is then
+        added to the raw thermocouple voltage.
+        """
+        if not isinstance(temperature, (int, float)):
+            logger.error(f"Invalid temperature type: {type(temperature)}")
+            raise ValueError("Temperature must be a number")
+        
+        if not cls.thermocouple_values:
+            logger.error("Thermocouple values table is empty")
+            raise ValueError("Thermocouple values table not initialized")
+        
+        try:
+            # Convert temperature to index (temperature = index - 50)
+            index = int(temperature + 50)
+            
+            # Clamp index to valid range
+            if index < 0:
+                index = 0
+            elif index >= len(cls.thermocouple_values):
+                index = len(cls.thermocouple_values) - 1
+            
+            voltage = cls.thermocouple_values[index]
+            logger.info(f"RTD temperature {temperature}°C -> thermocouple voltage {voltage} mV")
+            return voltage
+        except Exception as e:
+            logger.error(f"Error converting temperature to thermocouple voltage: {e}")
+            raise ValueError(f"Failed to convert temperature: {e}")
 # =========================
 # Thermocouple calculation
 # =========================
@@ -448,6 +481,45 @@ def voltage_uV_to_temperature_C(uV):
 
 
     return temp_C
+
+def apply_rtd_compensation(rtd_temperature: int, thermo_uV: float) -> float:
+    """Apply RTD compensation to thermocouple voltage.
+    
+    Algorithm:
+    1. Look up RTD temperature in thermocouple table to get corresponding voltage (mV)
+    2. Convert that voltage to microvolts
+    3. Add this voltage to the raw thermocouple voltage (in µV)
+    4. Convert the combined voltage back to temperature using voltage_uV_to_temperature_C
+    
+    Args:
+        rtd_temperature: RTD temperature in °C
+        thermo_uV: Raw thermocouple voltage in µV
+        
+    Returns:
+        Compensated thermocouple temperature in °C
+    """
+    try:
+        # Step 1: Look up thermocouple voltage corresponding to RTD temperature
+        rtd_voltage_mV = ThermocoupleTable.get_voltage_from_temperature(rtd_temperature)
+        
+        # Step 2: Convert from mV to µV
+        rtd_voltage_uV = rtd_voltage_mV * 1000.0
+        
+        # Step 3: Add RTD voltage to raw thermocouple voltage
+        combined_voltage_uV = thermo_uV + rtd_voltage_uV
+        
+        # Step 4: Convert combined voltage to temperature
+        compensated_temp = voltage_uV_to_temperature_C(combined_voltage_uV)
+        
+        logger.info(f"RTD Compensation: RTD_temp={rtd_temperature}°C, RTD_voltage={rtd_voltage_mV}mV, "
+                   f"TC_raw={thermo_uV}µV, Combined={combined_voltage_uV}µV, Result={compensated_temp}°C")
+        
+        return compensated_temp
+    except Exception as e:
+        logger.error(f"Error applying RTD compensation: {e}")
+        # Return original thermocouple temperature if compensation fails
+        return voltage_uV_to_temperature_C(thermo_uV)
+
     
 class SerialPortManager:
     """Manages serial port operations"""
@@ -589,7 +661,7 @@ class SensorDataParser:
     """Parses packet data to extract sensor values"""
     
     @staticmethod
-    def parse_packet(packet: List[int]) -> Optional[SensorData]:
+    def parse_packet(packet: List[int], enable_rtd_compensation: bool = False) -> Optional[SensorData]:
         """Parse packet and extract sensor data
         
         Byte layout:
@@ -601,6 +673,10 @@ class SensorDataParser:
         10-11: RTD (2 bytes)
         12-13: Thermocouple (2 bytes)
         14-15: Battery voltage (2 bytes)
+        
+        Args:
+            packet: The raw packet data
+            enable_rtd_compensation: If True, apply RTD compensation to thermocouple temperature
         """
         if not packet or len(packet) != 16:
             logger.error(f"Invalid packet length: {len(packet) if packet else 0}")
@@ -645,7 +721,12 @@ class SensorDataParser:
             thermo_raw = packet[13]
             thermo_raw = (thermo_raw << 8) | packet[12] 
             thermo_uV = raw_to_voltage_uV(thermo_raw)
-            thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
+            
+            # Apply RTD compensation if enabled
+            if enable_rtd_compensation and rtd_temperature is not None:
+                thermo_temperature_C = apply_rtd_compensation(rtd_temperature, thermo_uV)
+            else:
+                thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
        
             #thermo_uV = (thermo_raw * 1250000.0) / (32.0 * (2 ** 16))
              # Convert µV -> temperature using provided coefficients
@@ -721,7 +802,7 @@ class SensorGUI(tk.Tk):
         self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
 
         self.sel = tk.StringVar(value="")
-        self.apply_rtd_compensation = tk.BooleanVar(value=False)  # or IntVar/DoubleVar depending on your need
+        self.apply_rtd_compensation = tk.BooleanVar(value=True)  # Checkbox selected by default
 
         
         self.port_manager = SerialPortManager()
@@ -921,54 +1002,42 @@ class DashboardFrame(tk.Frame):
         tk.Checkbutton(
          comp_frame,
          text="Apply RTD Compensation",
-         variable=controller.apply_rtd_compensation,  # should be a tk.BooleanVar()
+         variable=controller.apply_rtd_compensation,  # tk.BooleanVar() with default value True
          bg="#e6e6e6",
+         font=("Arial", 10),
+         activebackground="#e6e6e6",
+         selectcolor="#ffffff",
          command=self.on_rtd_compensation_changed
         ).pack()
 
     def on_rtd_compensation_changed(self):
-    
-     enabled = self.controller.apply_rtd_compensation.get()  # True/False
-
-    # Read last received sensor values
-     tc = self.last_thermocouple
-     rtd = self.last_rtd
-
-     if tc is None:
-        print("Thermocouple value not available yet")
-        return
-
-    # Calculate compensated temperature if checkbox is ON
-     if enabled and rtd is not None:
-        compensated = tc + rtd
-        print(f"RTD Compensation ON → TC + RTD = {compensated:.2f} °C")
-        self.controller.thermo_val.set(f"{compensated:.1f}")
-     else:
-        print(f"RTD Compensation OFF → TC = {tc:.2f} °C")
-        self.controller.thermo_val.set(f"{tc:.1f}")
-
-    # Send command to hardware
+        """Handle RTD compensation checkbox toggle"""
+        enabled = self.controller.apply_rtd_compensation.get()
+        
+        # Send command to hardware
         self.send_rtd_compensation_command(enabled)
 
 # -------------------------------
 # Hardware Command Function
 # -------------------------------
     def send_rtd_compensation_command(self, enabled):
-   
+        """Send RTD compensation command to hardware"""
         try:
-          if enabled:
-            cmd = b'RTD_ON\n'   # replace with your device command
-          else:
-            cmd = b'RTD_OFF\n'
+            if enabled:
+                cmd = b'RTD_ON\n'
+                logger.info("RTD Compensation ENABLED - Command sent to hardware")
+            else:
+                cmd = b'RTD_OFF\n'
+                logger.info("RTD Compensation DISABLED - Command sent to hardware")
 
-        # Send via serial port
-          if hasattr(self.controller, 'serial') and self.controller.serial:
-            self.controller.serial.write(cmd)
-            print(f"Sent command to hardware: {cmd.decode().strip()}")
-          else:
-            print("Serial port not ready. Command not sent.")
+            # Send via serial port
+            if hasattr(self.controller, 'serial') and self.controller.serial and self.controller.serial.is_open:
+                self.controller.serial.write(cmd)
+                logger.info(f"Sent command to hardware: {cmd.decode().strip()}")
+            else:
+                logger.warning("Serial port not ready. Hardware command not sent, but software compensation will be applied.")
         except Exception as e:
-          print(f"Error sending RTD command: {e}")
+            logger.error(f"Error sending RTD command: {e}")
   
 
     def check_battery(self, battery_text):
@@ -1096,7 +1165,10 @@ class DashboardFrame(tk.Frame):
 
     # -------- PARSE DATA --------
         try:
-           data = self.controller.data_parser.parse_packet(packet)
+           data = self.controller.data_parser.parse_packet(
+               packet,
+               enable_rtd_compensation=self.controller.apply_rtd_compensation.get()
+           )
            # ===============================
 # TRANSMITTER DISCOVERY
 # ===============================
