@@ -737,6 +737,9 @@ class SensorGUI(tk.Tk):
         self.status_msg = tk.StringVar(value="Ready")
         self.is_reading = False
         self.is_paired = tk.BooleanVar(value=False)  
+        self.transmitter_id_val = tk.StringVar(value="WAITING")
+        self.com_port_val = tk.StringVar(value="NOT CONNECTED")
+
 
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
@@ -797,8 +800,8 @@ class DashboardFrame(tk.Frame):
         
         device_frame = tk.Frame(left_info, bg="#e6e6e6")
         device_frame.pack(fill="x", pady=(5, 0))
-        tk.Label(device_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
-        tk.Label(device_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
+        tk.Label(device_frame, text="DEVICE ID:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
+        tk.Label(device_frame, textvariable=controller.transmitter_id_val, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 12, "bold")).pack(side="left", padx=5)
         
         
@@ -852,7 +855,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff", 
                 font=("Arial", 22, "bold")).pack(pady=(40, 10))
         
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=500, height=200)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3, width=600, height=300)
         temp_box.pack(pady=20, padx=20)
         temp_box.pack_propagate(False)
         
@@ -1038,7 +1041,7 @@ class DashboardFrame(tk.Frame):
         # call the controller's port manager
         success, msg = self.controller.port_manager.open_port(port_name)
         if success:
-            self.controller.device_id_val.set(port_name)
+            self.controller.com_port_val.set(port_name)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
             # store a reference to serial if available
@@ -1056,7 +1059,7 @@ class DashboardFrame(tk.Frame):
         self.controller.port_manager.close_port()
         self.controller.is_reading = False
         self.controller.is_paired.set(False)
-        self.controller.device_id_val.set("NOT PAIRED")
+        self.controller.transmitter_id_val.set("NOT PAIRED")
         self.controller.packet_processor.reset()
         self.controller.serial = None
         self.controller.status_msg.set("Disconnected")
@@ -1094,6 +1097,26 @@ class DashboardFrame(tk.Frame):
     # -------- PARSE DATA --------
         try:
            data = self.controller.data_parser.parse_packet(packet)
+           # ===============================
+# TRANSMITTER DISCOVERY
+# ===============================
+           tx_id = getattr(data, "device_id", None)
+
+           conn = getattr(self, "connection_window", None)
+
+           if conn and tx_id:
+            tx_id = str(tx_id)
+
+            if tx_id not in conn.tx_ids:
+              conn.tx_ids.append(tx_id)
+              conn.tx_combo["values"] = conn.tx_ids
+
+        # Auto-select first TX
+            if len(conn.tx_ids) == 1:
+              conn.tx_combo.current(0)
+              conn.selected_tx = tx_id
+              self.controller.transmitter_id_val.set(tx_id)
+ 
         except Exception:
            return   # Exit only if parsing completely fails
         
@@ -1241,10 +1264,12 @@ class DashboardFrame(tk.Frame):
     def check_password(self):
         """Open Connection Settings popup safely"""
         try:
-          ConnectionSettings(
-            controller=self.controller,
-            dashboard=self
-        )
+          
+          self.connection_window = ConnectionSettings(
+           controller=self.controller,
+           dashboard=self
+         )
+
         except Exception as e:
           logger.exception("Failed to open ConnectionSettings")
           messagebox.showerror(
@@ -1278,14 +1303,25 @@ class ConnectionSettings(tk.Toplevel):
             bg="#f0f0f0"
         ).pack(pady=15)
 
-        # ---------- PORT SELECTION ----------
         frame = tk.Frame(self, bg="#f0f0f0")
         frame.pack(pady=10)
 
-        tk.Label(frame, text="USB Port:", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        tk.Label(
+          frame,
+          text="USB Port:",
+           bg="#f0f0f0",
+          font=("Arial", 11)
+        ).pack(side="left", padx=5)
 
-        self.combo = ttk.Combobox(frame, width=20, state="readonly")
-        self.combo.pack(side="left", padx=10)
+        # USB dropdown
+        self.combo = ttk.Combobox(
+          frame,
+          width=20,
+          state="readonly"
+       )
+        self.combo.pack(side="left", padx=5)
+
+
 
         # ---------- BUTTONS ----------
         btns = tk.Frame(self, bg="#f0f0f0")
@@ -1318,6 +1354,34 @@ class ConnectionSettings(tk.Toplevel):
             state="disabled"
         )
         self.btn_disconnect.pack(side="left", padx=5)
+
+        # ---------- TRANSMITTER ID ----------
+        tx_frame = tk.Frame(self, bg="#f0f0f0")
+        tx_frame.pack(pady=(5, 10))
+
+        tk.Label(
+        tx_frame,
+        text="Transmitter ID:",
+        bg="#f0f0f0",
+        font=("Arial", 11)
+        ).pack(side="left", padx=5)
+
+        self.tx_combo = ttk.Combobox(
+        tx_frame,
+        width=20,
+        state="readonly"
+    )
+        self.tx_combo.pack(side="left", padx=5)
+
+        self.tx_ids = []
+        self.selected_tx = None
+
+        self.tx_combo.bind(
+            "<<ComboboxSelected>>",
+        self.on_tx_selected
+    )
+
+
 
         # small status / instruction area
         self.status_label = tk.Label(self, text="Locked — enter password to enable controls", bg="#f0f0f0")
@@ -1373,8 +1437,20 @@ class ConnectionSettings(tk.Toplevel):
         # If you want to close the popup after successful connect, uncomment:
         # self.destroy()
 
+    def on_tx_selected(self, event):
+        self.selected_tx = self.tx_combo.get()
+        self.controller.transmitter_id_val.set(self.selected_tx)
+
+
     def disconnect(self):
         self.dashboard._close_port()
+
+
+        # Clear TX dropdown
+        self.tx_ids.clear()
+        self.tx_combo["values"] = []
+        self.selected_tx = None
+
 
 
 class SettingsFrame(tk.Frame):
