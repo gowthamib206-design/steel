@@ -737,6 +737,9 @@ class SensorGUI(tk.Tk):
         self.status_msg = tk.StringVar(value="Ready")
         self.is_reading = False
         self.is_paired = tk.BooleanVar(value=False)  
+        self.transmitter_id_val = tk.StringVar(value="WAITING")
+        self.com_port_val = tk.StringVar(value="NOT CONNECTED")
+
 
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
@@ -797,8 +800,8 @@ class DashboardFrame(tk.Frame):
         
         device_frame = tk.Frame(left_info, bg="#e6e6e6")
         device_frame.pack(fill="x", pady=(5, 0))
-        tk.Label(device_frame, text="DEVICE:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
-        tk.Label(device_frame, textvariable=controller.device_id_val, fg="#333333", bg="#e6e6e6", 
+        tk.Label(device_frame, text="DEVICE ID:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
+        tk.Label(device_frame, textvariable=controller.transmitter_id_val, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 12, "bold")).pack(side="left", padx=5)
         
         
@@ -1038,7 +1041,7 @@ class DashboardFrame(tk.Frame):
         # call the controller's port manager
         success, msg = self.controller.port_manager.open_port(port_name)
         if success:
-            self.controller.device_id_val.set(port_name)
+            self.controller.com_port_val.set(port_name)
             self.controller.is_paired.set(True)
             self.controller.is_reading = True
             # store a reference to serial if available
@@ -1056,7 +1059,7 @@ class DashboardFrame(tk.Frame):
         self.controller.port_manager.close_port()
         self.controller.is_reading = False
         self.controller.is_paired.set(False)
-        self.controller.device_id_val.set("NOT PAIRED")
+        self.controller.transmitter_id_val.set("NOT PAIRED")
         self.controller.packet_processor.reset()
         self.controller.serial = None
         self.controller.status_msg.set("Disconnected")
@@ -1109,10 +1112,11 @@ class DashboardFrame(tk.Frame):
               conn.tx_combo["values"] = conn.tx_ids
 
         # Auto-select first TX
-              if len(conn.tx_ids) == 1:
-               conn.tx_combo.current(0)
-               conn.selected_tx = tx_id
-
+            if len(conn.tx_ids) == 1:
+              conn.tx_combo.current(0)
+              conn.selected_tx = tx_id
+              self.controller.transmitter_id_val.set(tx_id)
+ 
         except Exception:
            return   # Exit only if parsing completely fails
         
@@ -1435,7 +1439,7 @@ class ConnectionSettings(tk.Toplevel):
 
     def on_tx_selected(self, event):
         self.selected_tx = self.tx_combo.get()
-        self.controller.device_id_val.set(self.selected_tx)
+        self.controller.transmitter_id_val.set(self.selected_tx)
 
 
     def disconnect(self):
