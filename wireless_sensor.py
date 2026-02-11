@@ -941,11 +941,12 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff",
              font=("Arial", 18, "bold")).grid(row=0, column=0, pady=(20, 10))
 
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3,width=700, height=180)
         temp_box.grid(row=1, column=0, pady=10, padx=20)
+        temp_box.pack_propagate(False)
 
         tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff",
-             font=("Arial", 72, "bold"), padx=20, pady=15).pack()
+             font=("Arial", 90, "bold"), padx=20, pady=15).pack()
 
         # Temperature unit
         tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 24, "bold")).grid(row=2, column=0, pady=(0, 10))
