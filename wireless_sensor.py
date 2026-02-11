@@ -483,7 +483,7 @@ def voltage_uV_to_temperature_C(uV):
 
     return temp_C
     
-class SerialPortManager:
+
 
     """Manages serial port operations"""
 def apply_rtd_compensation(rtd_temperature: int, thermo_uV: float) -> float:
@@ -524,7 +524,7 @@ def apply_rtd_compensation(rtd_temperature: int, thermo_uV: float) -> float:
         # Return original thermocouple temperature if compensation fails
         return voltage_uV_to_temperature_C(thermo_uV)
 
-
+class SerialPortManager:
     """Manages serial port operations"""
     
     def __init__(self):
