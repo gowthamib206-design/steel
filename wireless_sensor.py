@@ -1184,27 +1184,45 @@ class DashboardFrame(tk.Frame):
            return   # Exit only if parsing completely fails
         
         # ===============================
-# TRANSMITTER DISCOVERY
+# TRANSMITTER DISCOVERY & FILTERING
 # ===============================
+        tx_id = getattr(data, "device_id", None)
+        
         try:
-           tx_id = getattr(data, "device_id", None)
-
            conn = getattr(self, "connection_window", None)
 
            if conn and tx_id:
             tx_id = str(tx_id)
 
+            # Add to list if new
             if tx_id not in conn.tx_ids:
               conn.tx_ids.append(tx_id)
               conn.tx_combo["values"] = conn.tx_ids
+              logger.info(f"Discovered new transmitter: {tx_id}")
 
             # Auto-select first TX
             if len(conn.tx_ids) == 1:
               conn.tx_combo.current(0)
               conn.selected_tx = tx_id
               self.controller.transmitter_id_val.set(tx_id)
+              logger.info(f"Auto-selected first transmitter: {tx_id}")
         except Exception as e:
            logger.error(f"Error in transmitter discovery: {e}", exc_info=True)
+        
+        # ===============================
+# FILTER: Only process data if transmitter ID is selected and matches
+# ===============================
+        conn = getattr(self, "connection_window", None)
+        selected_tx = conn.selected_tx if conn else None
+        
+        # If a transmitter is selected, only process its data
+        if selected_tx and str(tx_id) != str(selected_tx):
+            logger.debug(f"Packet from {tx_id} ignored - only processing {selected_tx}")
+            return
+        
+        # If no transmitter is selected yet, show the data anyway (useful during discovery)
+        if not selected_tx and conn:
+            logger.debug(f"No transmitter selected yet, processing packet from {tx_id}")
         
         # -------- DEVICE TEMPERATURE --------
         device_temp = getattr(data, "temperature", None)
@@ -1524,8 +1542,21 @@ class ConnectionSettings(tk.Toplevel):
         # self.destroy()
 
     def on_tx_selected(self, event):
+        """Handle transmitter ID selection change"""
         self.selected_tx = self.tx_combo.get()
         self.controller.transmitter_id_val.set(self.selected_tx)
+        logger.info(f"Transmitter ID selected: {self.selected_tx}")
+        
+        # Clear UI data buffers when switching transmitters to avoid showing stale data
+        if hasattr(self.dashboard, 'tc_fifo'):
+            self.dashboard.tc_fifo.clear()
+        
+        # Reset temperature displays
+        self.controller.current_temp.set("--")
+        self.controller.rtd_temp.set("--")
+        self.controller.thermo_val.set("--")
+        self.controller.battery_val.set("--")
+        self.controller.rssi_val.set("--")
 
 
     def disconnect(self):
