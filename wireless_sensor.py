@@ -934,6 +934,7 @@ class DashboardFrame(tk.Frame):
         center_frame = tk.Frame(temp_display_area, bg="#ffffff")
         center_frame.grid(row=0, column=0, sticky="nsew")
         center_frame.grid_rowconfigure(0, weight=0)
+    
         center_frame.grid_rowconfigure(1, weight=0)
         center_frame.grid_rowconfigure(2, weight=0)
         #center_frame.grid_rowconfigure(3, weight=0)
@@ -970,11 +971,11 @@ class DashboardFrame(tk.Frame):
         self.battery_alert_box.grid(row=0, column=0, sticky="ew", padx=5)
         
         
-        tk.Label(self.battery_alert_box, text="🔴 BATTERY", fg="#d40000", bg="#ffffff",
-                font=("Arial", 11, "bold")).pack(pady=(8, 5))
+        tk.Label(self.battery_alert_box, text="🔴 BATTERY", fg="#000000", bg="#ffffff",
+                font=("Arial", 18, "bold")).pack(pady=(8, 5))
         
         self.battery_alert_label = tk.Label(self.battery_alert_box, text="Battery Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 10))
+                font=("Arial", 20))
         self.battery_alert_label.pack(pady=(8, 10))
         
         # ==================== THERMOCOUPLE ALERT BOX ====================
@@ -982,11 +983,11 @@ class DashboardFrame(tk.Frame):
         self.tc_alert_box.grid(row=0, column=1, sticky="ew", padx=5)
         
         
-        tk.Label(self.tc_alert_box, text="🔴 THERMO COUPLE", fg="#d40000", bg="#ffffff",
-                font=("Arial", 11, "bold")).pack(pady=(8, 5))
+        tk.Label(self.tc_alert_box, text="🔴 THERMO COUPLE", fg="#000000", bg="#ffffff",
+                font=("Arial", 18, "bold")).pack(pady=(8, 5))
         
         self.tc_alert_label = tk.Label(self.tc_alert_box, text="Thermocouple Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 10))
+                font=("Arial", 20))
         self.tc_alert_label.pack(pady=(8, 10))
         
         # ==================== RTD ALERT BOX ====================
@@ -994,11 +995,11 @@ class DashboardFrame(tk.Frame):
         self.rtd_alert_box.grid(row=0, column=2, sticky="ew", padx=8)
         
         
-        tk.Label(self.rtd_alert_box, text="🔴 RTD",fg="#d40000", bg="#ffffff", 
-                font=("Arial", 11, "bold")).pack(pady=(8, 5))
+        tk.Label(self.rtd_alert_box, text="🔴 RTD", fg="#000000", bg="#ffffff",
+                font=("Arial", 18, "bold")).pack(pady=(8, 5))
         
         self.rtd_alert_label = tk.Label(self.rtd_alert_box, text="RTD Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 10))
+                font=("Arial", 20))
         self.rtd_alert_label.pack(pady=(8, 10))
 
         # Sensor data grid (RTD, Thermocouple, RSSI)
@@ -1399,7 +1400,7 @@ class DashboardFrame(tk.Frame):
             elif battery_voltage < 3.6:
                 self.active_alerts["BATTERY"].append(("Battery low - Recharge soon", "yellow"))
                 battery_status = "Battery Low"
-                battery_color = "#ff9900"
+                battery_color =  "#d40000"
         
         # Update Battery alert box
         try:
