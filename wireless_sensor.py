@@ -1003,7 +1003,7 @@ class DashboardFrame(tk.Frame):
 
         # Sensor data grid (RTD, Thermocouple, RSSI)
         sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
-        sensor_frame.grid(row=1, column=0, sticky="ew", pady=20, padx=20)
+        sensor_frame.grid(row=2, column=0, sticky="ew", pady=20, padx=20)
         sensor_frame.grid_columnconfigure(0, weight=1)
         sensor_frame.grid_columnconfigure(1, weight=1)
         sensor_frame.grid_columnconfigure(2, weight=1)
@@ -1331,7 +1331,7 @@ class DashboardFrame(tk.Frame):
     def _check_alerts(self, data):
         """Check sensor data for alert conditions"""
 
-        if not hasattr(self, 'battery_alert_label') or not hasattr(self, 'lbl_status'):
+        if not hasattr(self, 'battery_alert_label'):
             return
         
         # Clear previous alerts
