@@ -972,10 +972,10 @@ class DashboardFrame(tk.Frame):
         
         
         tk.Label(self.battery_alert_box, text="🔴 BATTERY", fg="#000000", bg="#ffffff",
-                font=("Arial", 18, "bold")).pack(pady=(8, 5))
+                font=("Arial", 16, "bold")).pack(pady=(8, 5))
         
         self.battery_alert_label = tk.Label(self.battery_alert_box, text="Battery Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 20))
+                font=("Arial", 24, "bold"))
         self.battery_alert_label.pack(pady=(8, 10))
         
         # ==================== THERMOCOUPLE ALERT BOX ====================
@@ -984,10 +984,10 @@ class DashboardFrame(tk.Frame):
         
         
         tk.Label(self.tc_alert_box, text="🔴 THERMO COUPLE", fg="#000000", bg="#ffffff",
-                font=("Arial", 18, "bold")).pack(pady=(8, 5))
+                font=("Arial", 16, "bold")).pack(pady=(8, 5))
         
         self.tc_alert_label = tk.Label(self.tc_alert_box, text="Thermocouple Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 20))
+                font=("Arial", 24, "bold"))
         self.tc_alert_label.pack(pady=(8, 10))
         
         # ==================== RTD ALERT BOX ====================
@@ -996,10 +996,10 @@ class DashboardFrame(tk.Frame):
         
         
         tk.Label(self.rtd_alert_box, text="🔴 RTD", fg="#000000", bg="#ffffff",
-                font=("Arial", 18, "bold")).pack(pady=(8, 5))
+                font=("Arial", 16, "bold")).pack(pady=(8, 5))
         
         self.rtd_alert_label = tk.Label(self.rtd_alert_box, text="RTD Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 20))
+                font=("Arial", 24, "bold"))
         self.rtd_alert_label.pack(pady=(8, 10))
 
         # Sensor data grid (RTD, Thermocouple, RSSI)
@@ -1344,67 +1344,85 @@ class DashboardFrame(tk.Frame):
         
         # RTD resistance alerts
         rtd_resistance = getattr(data, "rtd_resistance", None)
-        rtd_status = "RTD Normal"
+        rtd_status = " Normal"
         rtd_color = "#006600"
         
         if rtd_resistance is not None:
             if rtd_resistance < 100:
                 self.active_alerts["RTD"].append(("RTD under lower limit. May be short circuit", "red"))
-                rtd_status = "RTD Short Circuit"
+                rtd_status = " Short Circuit"
                 rtd_color = "#d40000"
             elif rtd_resistance > 390:
                 self.active_alerts["RTD"].append(("RTD over upper limit. May be RTD is melt and open", "red"))
-                rtd_status = "RTD Open Circuit"
+                rtd_status = "Open Circuit"
                 rtd_color = "#d40000"
         
         # Update RTD alert box
         try:
             self.rtd_alert_label.config(text=rtd_status, fg=rtd_color)
+            if rtd_color == "#d40000":  # red alert
+                self.rtd_alert_box.config(bg=rtd_color)
+                self.rtd_alert_label.config(bg=rtd_color, fg="#ffffff")  # white text
+            else:
+                self.rtd_alert_box.config(bg="#ffffff")
+                self.rtd_alert_label.config(bg="#ffffff", fg=rtd_color)
         except:
             pass
         
         # Thermocouple voltage alerts
         tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
-        tc_status = "Thermocouple Normal"
+        tc_status = " Normal"
         tc_color = "#006600"
         
         if tc_voltage_uv is not None:
             if tc_voltage_uv < 100:
                 self.active_alerts["THERMOCOUPLE"].append(("Thermo couple temperature is under lower limit. May be short", "red"))
-                tc_status = "TC Short Circuit"
+                tc_status = " Short Circuit"
                 tc_color = "#d40000"
             elif tc_voltage_uv > 14000:
                 self.active_alerts["THERMOCOUPLE"].append(("Thermocouple is not connected or short", "red"))
-                tc_status = "TC Not Connected"
+                tc_status = " Not Connected"
                 tc_color = "#d40000"
             elif 100 <= tc_voltage_uv <= 1800:
-                tc_status = "TC Connected"
+                tc_status = " Connected"
                 tc_color = "#ff9900"
         
         # Update Thermocouple alert box
         try:
             self.tc_alert_label.config(text=tc_status, fg=tc_color)
+            if tc_color == "#d40000":  # red alert
+               self.tc_alert_box.config(bg=tc_color)
+               self.tc_alert_label.config(bg=tc_color, fg="#ffffff")
+            else:
+               self.tc_alert_box.config(bg="#ffffff")
+               self.tc_alert_label.config(bg="#ffffff", fg=tc_color)
         except:
             pass
         
         # Battery voltage alerts
         battery_voltage = getattr(data, "battery_voltage", None)
-        battery_status = "Battery Normal"
+        battery_status = " Normal"
         battery_color = "#006600"
         
         if battery_voltage is not None:
             if battery_voltage < 3.35:
                 self.active_alerts["BATTERY"].append(("Battery critically low - Charge immediately!", "red"))
-                battery_status = "Battery Critical"
+                battery_status = " Critical"
                 battery_color = "#d40000"
             elif battery_voltage < 3.6:
                 self.active_alerts["BATTERY"].append(("Battery low - Recharge soon", "yellow"))
-                battery_status = "Battery Low"
+                battery_status = " Low"
                 battery_color =  "#d40000"
         
         # Update Battery alert box
         try:
             self.battery_alert_label.config(text=battery_status, fg=battery_color)
+            if battery_color == "#d40000":  # red alert
+              self.battery_alert_box.config(bg=battery_color)
+              self.battery_alert_label.config(bg=battery_color, fg="#ffffff")
+            else:
+               self.battery_alert_box.config(bg="#ffffff")
+               self.battery_alert_label.config(bg="#ffffff", fg=battery_color)
         except:
             pass
         
