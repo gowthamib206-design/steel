@@ -385,33 +385,25 @@ class ThermocoupleTable:
 
     @classmethod
     def get_voltage_from_temperature(cls, temperature: int) -> float:
-        """Convert RTD temperature to thermocouple voltage (mV) using lookup table.
+        """Convert RTD temperature to thermocouple voltage (mV) using polynomial.
         
-        This is used for RTD compensation: we look up the RTD temperature in the
-        thermocouple table to find the corresponding millivolts, which is then
-        added to the raw thermocouple voltage.
+        This is used for RTD compensation: we calculate the thermocouple voltage
+        corresponding to the RTD temperature using the polynomial equation.
+        Returns voltage in millivolts (mV).
         """
         if not isinstance(temperature, (int, float)):
             logger.error(f"Invalid temperature type: {type(temperature)}")
             raise ValueError("Temperature must be a number")
         
-        if not cls.thermocouple_values:
-            logger.error("Thermocouple values table is empty")
-            raise ValueError("Thermocouple values table not initialized")
-        
         try:
-            # Convert temperature to index (temperature = index - 50)
-            index = int(temperature + 50)
+            # Use polynomial to get voltage in µV
+            voltage_uV = temperature_C_to_voltage_uV(temperature)
             
-            # Clamp index to valid range
-            if index < 0:
-                index = 0
-            elif index >= len(cls.thermocouple_values):
-                index = len(cls.thermocouple_values) - 1
+            # Convert from µV to mV
+            voltage_mV = voltage_uV / 1000.0
             
-            voltage = cls.thermocouple_values[index]
-            logger.info(f"RTD temperature {temperature}°C -> thermocouple voltage {voltage} mV")
-            return voltage
+            logger.info(f"RTD temperature {temperature}°C -> thermocouple voltage {voltage_mV} mV ({voltage_uV} µV)")
+            return voltage_mV
         except Exception as e:
             logger.error(f"Error converting temperature to thermocouple voltage: {e}")
             raise ValueError(f"Failed to convert temperature: {e}")
@@ -480,7 +472,82 @@ def voltage_uV_to_temperature_C(uV):
 
 
     return temp_C
+
+
+# Type B Thermocouple: Temperature to Voltage conversion coefficients
+# Reference: ITS-90 polynomial coefficients
+# Equation: E = Σ c_i(t_90)^i, where E is in microvolts and t_90 is in °C
+
+# Temperature range: 0 to 630.615°C
+COEFFS_TEMP_TO_UV_LOW = [
+    0.0,                    # c0
+    -2.465081834600e-1,     # c1
+    5.904042117100e2,       # c2
+    -1.325793163600e6,      # c3
+    1.566829190100e9,       # c4
+    -1.694452925300e12,     # c5
+    6.229034709400e15,      # c6
+    9.897564082100e18,      # c7 (placeholder - extended range)
+    -9.379133028900e20,     # c8 (placeholder - extended range)
+]
+
+# Temperature range: 630.615°C to 1,820°C
+COEFFS_TEMP_TO_UV_HIGH = [
+    -3.893816862100e3,      # c0
+    2.857174747000e1,       # c1
+    -8.488510478500e-3,     # c2
+    1.578528016400e-6,      # c3
+    -1.683534486600e-10,    # c4
+    1.110979000300e-14,     # c5
+    -4.451543543300e-18,    # c6
+    9.897564082100e-22,     # c7
+    -9.379133028900e-26,    # c8
+]
+
+RANGE_TEMP_LOW_C = (0.0, 630.615)
+RANGE_TEMP_HIGH_C = (630.615, 1820.0)
+
+
+def temperature_C_to_voltage_uV(temperature_C: float) -> float:
+    """
+    Convert temperature (°C) to thermocouple voltage (µV) using polynomial.
     
+    Uses Type B thermocouple reference equation:
+    E = Σ c_i(t_90)^i
+    
+    where:
+        E is voltage in microvolts (µV)
+        t_90 is temperature in degrees Celsius (°C)
+        c_i are polynomial coefficients
+    
+    Args:
+        temperature_C: Temperature in degrees Celsius
+        
+    Returns:
+        Voltage in microvolts (µV)
+    """
+    # Choose coefficients based on temperature range
+    if RANGE_TEMP_LOW_C[0] <= temperature_C <= RANGE_TEMP_LOW_C[1]:
+        coeffs = COEFFS_TEMP_TO_UV_LOW
+    elif RANGE_TEMP_HIGH_C[0] < temperature_C <= RANGE_TEMP_HIGH_C[1]:
+        coeffs = COEFFS_TEMP_TO_UV_HIGH
+    else:
+        # Extrapolate using nearest range
+        coeffs = COEFFS_TEMP_TO_UV_LOW if temperature_C < RANGE_TEMP_LOW_C[0] else COEFFS_TEMP_TO_UV_HIGH
+        logger.warning(f"Temperature {temperature_C}°C outside calibrated range, using extrapolation")
+    
+    # Calculate polynomial: E = Σ c_i(t_90)^i
+    terms = []
+    for i in range(len(coeffs)):
+        c = coeffs[i]
+        t = c * (temperature_C ** i)
+        terms.append(t)
+    
+    # Sum all terms to get voltage in µV
+    voltage_uV = sum(terms)
+    logger.debug(f"Temperature {temperature_C}°C converted to thermocouple voltage {voltage_uV}µV")
+    
+    return voltage_uV
 
 
     """Manages serial port operations"""
@@ -488,10 +555,9 @@ def apply_rtd_compensation(rtd_temperature: int, thermo_uV: float) -> float:
     """Apply RTD compensation to thermocouple voltage.
     
     Algorithm:
-    1. Look up RTD temperature in thermocouple table to get corresponding voltage (mV)
-    2. Convert that voltage to microvolts
-    3. Add this voltage to the raw thermocouple voltage (in µV)
-    4. Convert the combined voltage back to temperature using voltage_uV_to_temperature_C
+    1. Calculate RTD temperature equivalent voltage using polynomial
+    2. Add this voltage to the raw thermocouple voltage (in µV)
+    3. Convert the combined voltage back to temperature using voltage_uV_to_temperature_C
     
     Args:
         rtd_temperature: RTD temperature in °C
@@ -501,19 +567,16 @@ def apply_rtd_compensation(rtd_temperature: int, thermo_uV: float) -> float:
         Compensated thermocouple temperature in °C
     """
     try:
-        # Step 1: Look up thermocouple voltage corresponding to RTD temperature
-        rtd_voltage_mV = ThermocoupleTable.get_voltage_from_temperature(rtd_temperature)
+        # Step 1: Calculate thermocouple voltage corresponding to RTD temperature using polynomial
+        rtd_voltage_uV = temperature_C_to_voltage_uV(rtd_temperature)
         
-        # Step 2: Convert from mV to µV
-        rtd_voltage_uV = rtd_voltage_mV * 1000.0
-        
-        # Step 3: Add RTD voltage to raw thermocouple voltage
+        # Step 2: Add RTD voltage to raw thermocouple voltage
         combined_voltage_uV = thermo_uV + rtd_voltage_uV
         
-        # Step 4: Convert combined voltage to temperature
+        # Step 3: Convert combined voltage to temperature
         compensated_temp = voltage_uV_to_temperature_C(combined_voltage_uV)
         
-        logger.info(f"RTD Compensation: RTD_temp={rtd_temperature}°C, RTD_voltage={rtd_voltage_mV}mV, "
+        logger.info(f"RTD Compensation: RTD_temp={rtd_temperature}°C, RTD_voltage={rtd_voltage_uV}µV, "
                    f"TC_raw={thermo_uV}µV, Combined={combined_voltage_uV}µV, Result={compensated_temp}°C")
         
         return compensated_temp
