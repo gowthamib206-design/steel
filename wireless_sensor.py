@@ -481,27 +481,23 @@ def voltage_uV_to_temperature_C(uV):
 # Temperature range: 0 to 630.615°C
 COEFFS_TEMP_TO_UV_LOW = [
     0.0,                    # c0
-    -2.465081834600e-1,     # c1
-    5.904042117100e2,       # c2
-    -1.325793163600e6,      # c3
-    1.566829190100e9,       # c4
-    -1.694452925300e12,     # c5
-    6.229034709400e15,      # c6
-    9.897564082100e18,      # c7 (placeholder - extended range)
-    -9.379133028900e20,     # c8 (placeholder - extended range)
+    -2.465081834600e1,      # c1: -2.465 081 834 6 × 10^1
+    5.904042111700e3,       # c2: 5.904 042 111 7 × 10^3
+    -1.325793163600e-6,     # c3: -1.325 793 163 6 × 10^-6
+    1.566829190100e-9,      # c4: 1.566 829 190 1 × 10^-9
+    -1.694452924000e-12,    # c5: -1.694 452 924 0 × 10^-12
+    6.229034709400e-16,     # c6: 6.229 034 709 4 × 10^-16
 ]
 
 # Temperature range: 630.615°C to 1,820°C
 COEFFS_TEMP_TO_UV_HIGH = [
-    -3.893816862100e3,      # c0
-    2.857174747000e1,       # c1
-    -8.488510478500e-3,     # c2
-    1.578528016400e-6,      # c3
-    -1.683534486600e-10,    # c4
-    1.110979000300e-14,     # c5
-    -4.451543543300e-18,    # c6
-    9.897564082100e-22,     # c7
-    -9.379133028900e-26,    # c8
+    -3.893816862100e3,      # c0: -3.893 816 862 1 × 10^3
+    2.857174747000e1,       # c1: 2.857 174 747 0 × 10^1
+    -8.488510478500e-3,     # c2: -8.488 510 478 5 × 10^-3
+    1.578528016400e-6,      # c3: 1.578 528 016 4 × 10^-6
+    -1.683534486600e-10,    # c4: -1.683 534 486 6 × 10^-10
+    1.110979000300e-14,     # c5: 1.110 979 000 3 × 10^-14
+    -4.451543543300e-18,    # c6: -4.451 543 543 3 × 10^-18
 ]
 
 RANGE_TEMP_LOW_C = (0.0, 630.615)
@@ -773,20 +769,26 @@ class SensorDataParser:
                 logger.error(f"Negative RTD resistance: {rtd_resistance}")
                 raise ValueError("RTD resistance cannot be negative")
             
+            rtd_temperature = None
             try:
                 rtd_temperature = RTDTemperatureTable.get_temperature_from_resistance(rtd_resistance)
             except ValueError as e:
                 logger.error(f"Failed to convert RTD: {e}")
-                rtd_temperature = 0
+                rtd_temperature = None
             
             # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
             thermo_raw = packet[13]
             thermo_raw = (thermo_raw << 8) | packet[12] 
             thermo_uV = raw_to_voltage_uV(thermo_raw)
             
-            # Apply RTD compensation if enabled
+            # Apply RTD compensation if enabled and RTD data is valid
             if enable_rtd_compensation and rtd_temperature is not None:
-                thermo_temperature_C = apply_rtd_compensation(rtd_temperature, thermo_uV)
+                try:
+                    thermo_temperature_C = apply_rtd_compensation(rtd_temperature, thermo_uV)
+                    logger.debug(f"RTD compensation applied: RTD={rtd_temperature}°C, Result={thermo_temperature_C}°C")
+                except Exception as e:
+                    logger.warning(f"RTD compensation failed: {e}, using raw thermocouple conversion")
+                    thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
             else:
                 thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
             
