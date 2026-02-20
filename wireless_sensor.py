@@ -1180,21 +1180,7 @@ class DashboardFrame(tk.Frame):
         
          # -------------------------------
 # RTD Compensation Checkbox Setup
-# -------------------------------
-        comp_frame = tk.Frame(footer, bg="#e6e6e6")
-        comp_frame.pack(side="left", padx=10, pady=12)
-
-        tk.Checkbutton(
-         comp_frame,
-         text="Apply RTD Compensation",
-         variable=controller.apply_rtd_compensation,  # tk.BooleanVar() with default value True
-         bg="#e6e6e6",
-         font=("Arial", 10),
-         activebackground="#e6e6e6",
-         selectcolor="#ffffff",
-         command=self.on_rtd_compensation_changed
-        ).pack()
-
+# -----
 # -------------------------------
 # RTD Compensation Callback
 # -------------------------------
@@ -2122,7 +2108,7 @@ class SettingsFrame(tk.Frame):
         
         
         # Content area
-        content = tk.Frame(self, bg="#f0f0f0")
+        """ content = tk.Frame(self, bg="#f0f0f0")
         content.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Notebook style
@@ -2199,7 +2185,7 @@ class SettingsFrame(tk.Frame):
         tk.Label(info_box, text="Baud Rate: 115200", fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
         tk.Label(info_box, text="Packet Length: 16 bytes", fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)
+                font=("Arial", 11)).pack(anchor="w", padx=15, pady=5)"""
     
     def check_password_for_exit(self):
         
