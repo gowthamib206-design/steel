@@ -1105,7 +1105,7 @@ class DashboardFrame(tk.Frame):
         
 
          # Settings button (right)
-        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
+        tk.Button(footer, text="⚙ PAIRED DEVICE", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
         
          # -------------------------------
