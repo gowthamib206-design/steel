@@ -5,7 +5,7 @@ Modern UI based on ACUCAST reference
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
 from tkinter.filedialog import Open
 from PIL import Image, ImageTk
 import serial
@@ -20,6 +20,7 @@ import time
 import re
 import sys
 import os
+import csv
 from PIL import Image, ImageTk
 
 # Configure logging
@@ -871,11 +872,27 @@ class SensorGUI(tk.Tk):
 
         self.sel = tk.StringVar(value="")
         self.apply_rtd_compensation = tk.BooleanVar(value=True)  # Checkbox selected by default
+        self.station_name = tk.StringVar(value="")
+        self.view_mode = tk.StringVar(value="Digital View")
+        self.operator_name = tk.StringVar(value="")
+        self.ip_address = tk.StringVar(value="")
+        self.port_number = tk.StringVar(value="")
+        self.location_name = tk.StringVar(value="")
+        self.company_name = tk.StringVar(value="")
+        self.units = tk.StringVar(value="°C")
+        self.com_port = tk.StringVar()
+        self.baud_rate = tk.StringVar(value="")
+        self.mb_slave_id = tk.StringVar(value="")
+        self.eth_ip = tk.StringVar(value="")
+        self.eth_port = tk.StringVar()
+        self.analog_low = tk.StringVar(value="0")
+        self.analog_high = tk.StringVar(value="")
+        self.prof_station = tk.StringVar(value="")
+        self.raw_hex = tk.StringVar()
+        self.bat_voltage = tk.StringVar()
+        self.signal_strength = tk.StringVar()
+        self.firmware_version = tk.StringVar()
 
-        
-        self.port_manager = SerialPortManager()
-        self.packet_processor = PacketProcessor()
-        self.data_parser = SensorDataParser()
          # Observable variables
         self.current_temp = tk.StringVar(value="--")
         self.device_id_val = tk.StringVar(value="NOT PAIRED")
@@ -888,6 +905,11 @@ class SensorGUI(tk.Tk):
         self.is_paired = tk.BooleanVar(value=False)  
         self.transmitter_id_val = tk.StringVar(value="WAITING")
         self.com_port_val = tk.StringVar(value="NOT CONNECTED")
+
+        
+        self.port_manager = SerialPortManager()
+        self.packet_processor = PacketProcessor()
+        self.data_parser = SensorDataParser()
 
 
         self.container = tk.Frame(self, bg="#f0f0f0")
@@ -1107,6 +1129,54 @@ class DashboardFrame(tk.Frame):
          # Settings button (right)
         tk.Button(footer, text="⚙ PAIRED DEVICE", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
+        
+          
+        # ⚙ CONFIGURATION Button - WITH PASSWORD (NEW)
+        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
+                 width=20, command=self.check_configuration_password).pack(side="right", padx=20, pady=12)
+        
+        # RTD Compensation Checkbox
+        comp_frame = tk.Frame(footer, bg="#e6e6e6")
+        comp_frame.pack(side="left", padx=10, pady=12)
+
+        tk.Checkbutton(
+         comp_frame,
+         text="Apply RTD Compensation",
+         variable=controller.apply_rtd_compensation,
+         bg="#e6e6e6",
+         font=("Arial", 10),
+         activebackground="#e6e6e6",
+         selectcolor="#ffffff",
+         command=self.on_rtd_compensation_changed
+        ).pack()
+
+    # ==================== ADD THESE NEW METHODS ====================
+    def check_paired_device_password(self):
+        """Check password for Paired Device button"""
+        password = simpledialog.askstring("Security", "Enter Password for Paired Device:", show='*')
+        if password == "1111":
+            self.open_paired_device_settings()
+        elif password is not None:
+            messagebox.showerror("Access Denied", "Incorrect Password")
+
+    def check_configuration_password(self):
+        """Check password for Configuration button"""
+        password = simpledialog.askstring("Security", "Enter Configuration Password:", show='*')
+        if password == "1111":
+            self.controller.show_frame("SettingsFrame")
+        elif password is not None:
+            messagebox.showerror("Access Denied", "Incorrect Password")
+
+    def open_paired_device_settings(self):
+        """Open paired device connection window"""
+        try:
+            self.connection_window = ConnectionSettings(
+                controller=self.controller,
+                dashboard=self
+            )
+        except Exception as e:
+            logger.exception("Failed to open ConnectionSettings")
+            messagebox.showerror("Error", f"Unable to open connection settings:\n{e}")
         
          # -------------------------------
 # RTD Compensation Checkbox Setup
@@ -1822,6 +1892,234 @@ class SettingsFrame(tk.Frame):
         tk.Button(header, text="← BACK TO DASHBOARD", bg="#cccccc", fg="black", font=("Arial", 10, "bold"),
                  command=lambda: controller.show_frame("DashboardFrame"), 
                  activebackground="#000000", activeforeground="#ffffff").pack(side="right", padx=20, pady=12)
+        
+          # ========== TAB NAVIGATION (HORIZONTAL) ==========
+        tab_nav = tk.Frame(self, bg="#d0d0d0", height=50)
+        tab_nav.pack(fill="x", padx=0, pady=0)
+        tab_nav.pack_propagate(False)
+        
+        self.tab_buttons = {}
+        self.tab_frames = {}
+        tabs = ["General", "Graph", "Transmitter", "Outputs", "Troubleshooting", "History"]
+        
+        for i, tab_name in enumerate(tabs):
+            btn = tk.Button(
+                tab_nav,
+                text=tab_name,
+                bg="#cccccc" if i == 0 else "#b0b0b0",
+                fg="black",
+                font=("Arial", 11, "bold"),
+                relief="raised",
+                padx=15,
+                pady=10,
+                command=lambda t=tab_name: self.show_tab(t)
+            )
+            btn.pack(side="left", padx=2, pady=5)
+            self.tab_buttons[tab_name] = btn
+        
+        # ========== CONTENT AREA ==========
+        self.content_container = tk.Frame(self, bg="#f0f0f0")
+        self.content_container.pack(fill="both", expand=True, padx=0, pady=0)
+        self.content_container.grid_rowconfigure(0, weight=1)
+        self.content_container.grid_columnconfigure(0, weight=1)
+        
+        # ========== TAB 1: GENERAL ==========
+        self.tab_frames["General"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["General"].grid(row=0, column=0, sticky="nsew")
+        gen_content = tk.Frame(self.tab_frames["General"], bg="#f0f0f0")
+        gen_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        tk.Label(gen_content, text="General Settings", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        self.create_entry_row(gen_content, "Station Name:", controller.station_name)
+        self.create_static_row(gen_content, "Sensor Type:", "Type B")
+        self.create_combobox_row(gen_content, "Dashboard View:", controller.view_mode, ["Digital View", "Graph View"])
+        self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
+        
+        # ========== TAB 2: GRAPH ==========
+        self.tab_frames["Graph"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Graph"].grid(row=0, column=0, sticky="nsew")
+        graph_content = tk.Frame(self.tab_frames["Graph"], bg="#f0f0f0")
+        graph_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        tk.Label(graph_content, text="Graph Display Settings", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        tk.Label(graph_content, text="Configure time scales and axis modes for live graph display", 
+                font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
+        tk.Label(graph_content, text="• Time Scale: Adjust data buffer duration", 
+                font=("Arial", 10), bg="#f0f0f0", fg="#666666").pack(anchor="w")
+        tk.Label(graph_content, text="• Y-Axis Mode: Auto or Manual scaling", 
+                font=("Arial", 10), bg="#f0f0f0", fg="#666666").pack(anchor="w")
+        
+        # ========== TAB 3: TRANSMITTER ==========
+        self.tab_frames["Transmitter"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Transmitter"].grid(row=0, column=0, sticky="nsew")
+        tx_content = tk.Frame(self.tab_frames["Transmitter"], bg="#f0f0f0")
+        tx_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        tk.Label(tx_content, text="Transmitter Information", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        
+        device_id = controller.transmitter_id_val.get() or "NOT PAIRED"
+        self.create_static_row(tx_content, "Paired Device:", device_id)
+        self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")
+        self.create_static_row(tx_content, "Device Status:", "Connected")
+
+        # ========== TAB 4: OUTPUTS ==========
+        self.tab_frames["Outputs"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Outputs"].grid(row=0, column=0, sticky="nsew")
+        outputs_content = tk.Frame(self.tab_frames["Outputs"], bg="#f0f0f0")
+        outputs_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        tk.Label(outputs_content, text="Output Configuration", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        
+        # COM Port Settings
+        com_frame = tk.LabelFrame(outputs_content, text="COM Port Settings", bg="#f0f0f0", 
+                                 font=("Arial", 12, "bold"), padx=15, pady=15)
+        com_frame.pack(fill="x", pady=10)
+        self.create_combobox_row(com_frame, "Port:", controller.com_port, ["COM1", "COM2", "COM3", "USB-SERIAL"])
+        self.create_combobox_row(com_frame, "Baud Rate:", controller.baud_rate, ["9600", "19200", "38400", "115200"])
+        
+        self.out_notebook = ttk.Notebook(outputs_content)
+        self.out_notebook.pack(fill="both", expand=True, padx=0, pady=10)
+        
+        tab_rtu = tk.Frame(self.out_notebook, bg="#f0f0f0")
+        self.out_notebook.add(tab_rtu, text="Modbus RTU")
+        rtu_content = tk.Frame(tab_rtu, bg="#f0f0f0")
+        rtu_content.pack(fill="both", expand=True, padx=20, pady=20)
+        self.create_entry_row(rtu_content, "Slave ID:", controller.mb_slave_id)
+        
+        tab_tcp = tk.Frame(self.out_notebook, bg="#f0f0f0")
+        self.out_notebook.add(tab_tcp, text="Modbus TCP")
+        tcp_content = tk.Frame(tab_tcp, bg="#f0f0f0")
+        tcp_content.pack(fill="both", expand=True, padx=20, pady=20)
+        self.create_entry_row(tcp_content, "IP Address:", controller.eth_ip)
+        self.create_entry_row(tcp_content, "Port:", controller.eth_port)
+        
+        tab_420 = tk.Frame(self.out_notebook, bg="#f0f0f0")
+        self.out_notebook.add(tab_420, text="4-20mA")
+        analog_content = tk.Frame(tab_420, bg="#f0f0f0")
+        analog_content.pack(fill="both", expand=True, padx=20, pady=20)
+        self.create_entry_row(analog_content, "Temp @ 4mA:", controller.analog_low)
+        self.create_entry_row(analog_content, "Temp @ 20mA:", controller.analog_high)
+        
+        tab_prof = tk.Frame(self.out_notebook, bg="#f0f0f0")
+        self.out_notebook.add(tab_prof, text="Profibus/Net")
+        prof_content = tk.Frame(tab_prof, bg="#f0f0f0")
+        prof_content.pack(fill="both", expand=True, padx=20, pady=20)
+        self.create_entry_row(prof_content, "Station Address:", controller.prof_station)
+        
+        # ========== TAB 5: TROUBLESHOOTING ==========
+        self.tab_frames["Troubleshooting"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Troubleshooting"].grid(row=0, column=0, sticky="nsew")
+        debug_content = tk.Frame(self.tab_frames["Troubleshooting"], bg="#f0f0f0")
+        debug_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        tk.Label(debug_content, text="Diagnostic Information", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        
+        diag_frame = tk.LabelFrame(debug_content, text="Sensor Diagnostics", bg="#f0f0f0", 
+                                  font=("Arial", 12, "bold"), padx=15, pady=15)
+        diag_frame.pack(fill="x", pady=10)
+        self.create_diag_row(diag_frame, "Raw ADC Hex:", controller.raw_hex)
+        self.create_diag_row(diag_frame, "Battery Voltage:", controller.bat_voltage)
+        
+        # ========== TAB 6: HISTORY ==========
+        self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["History"].grid(row=0, column=0, sticky="nsew")
+        hist_content = tk.Frame(self.tab_frames["History"], bg="#f0f0f0")
+        hist_content.pack(fill="both", expand=True, padx=30, pady=30)
+        
+        tk.Label(hist_content, text="Measurement History", fg="#333333", bg="#f0f0f0", 
+                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        
+        tk.Button(hist_content, text="📥 EXPORT TO CSV", bg="#0066cc", fg="white", font=("Arial", 12, "bold"),
+                  command=self.export_csv).pack(pady=10)
+        
+        self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
+        self.history_list.pack(fill="both", expand=True, pady=10)
+        
+        # Show first tab
+        self.show_tab("General")
+        
+        # ========== FOOTER BUTTONS ==========
+        footer_frame = tk.Frame(self, bg="#f0f0f0", height=60)
+        footer_frame.pack(fill="x", side="bottom", padx=0, pady=0)
+        footer_frame.pack_propagate(False)
+        
+        tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
+                  padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)
+
+    def show_tab(self, tab_name):
+        """Show selected tab and update button colors"""
+        # Hide all tabs
+        for frame in self.tab_frames.values():
+            frame.grid_remove()
+        
+        # Show selected tab
+        self.tab_frames[tab_name].grid()
+        
+        # Update button colors
+        for btn_name, btn in self.tab_buttons.items():
+            if btn_name == tab_name:
+                btn.config(bg="#ffffff", relief="sunken")  # Active button
+            else:
+                btn.config(bg="#b0b0b0", relief="raised")  # Inactive button
+    
+    # ==================== HELPER METHODS ====================
+    def create_static_row(self, parent, label, value):
+        f = tk.Frame(parent, bg="#f0f0f0")
+        f.pack(fill="x", pady=8)
+        tk.Label(f, text=label, width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        tk.Label(f, text=str(value), anchor="w", bg="#f0f0f0", font=("Arial", 12), fg="#0055aa").pack(side="left", padx=15)
+
+    def create_combobox_row(self, parent, label, var, options):
+        f = tk.Frame(parent, bg="#f0f0f0")
+        f.pack(fill="x", pady=8)
+        tk.Label(f, text=label, width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        ttk.Combobox(f, textvariable=var, values=options, state="readonly", font=("Arial", 11), width=25).pack(side="left", padx=15)
+
+    def create_entry_row(self, parent, label, var):
+        f = tk.Frame(parent, bg="#f0f0f0")
+        f.pack(fill="x", pady=8)
+        tk.Label(f, text=label, width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        tk.Entry(f, textvariable=var, font=("Arial", 11), width=28).pack(side="left", padx=15)
+
+    def create_diag_row(self, parent, label, var):
+        f = tk.Frame(parent, bg="#f0f0f0")
+        f.pack(fill="x", pady=8)
+        tk.Label(f, text=label, width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        tk.Label(f, textvariable=var, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc").pack(side="left", padx=15)
+
+    def export_csv(self):
+        """Export measurements to CSV"""
+        filename = filedialog.asksaveasfilename(
+           defaultextension=".csv",
+           filetypes=[("CSV Files", "*.csv")]
+        )
+
+        if not filename:
+          return
+
+        try:
+            self.controller.cursor.execute("SELECT * FROM measurements")
+            rows = self.controller.cursor.fetchall()
+
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+              writer = csv.writer(f)
+              writer.writerow(["ID", "Timestamp", "Temp", "CJC", "Battery", "RSSI", "Status"])
+              writer.writerows(rows)
+
+            messagebox.showinfo("Export Success", f"Data exported to {filename}")
+
+        except Exception as e:
+          messagebox.showerror("Export Error", str(e))
+
+    def save_and_exit(self):
+        self.controller.show_frame("DashboardFrame")
+
+        
         
         # Content area
         content = tk.Frame(self, bg="#f0f0f0")
