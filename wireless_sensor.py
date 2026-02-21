@@ -892,12 +892,14 @@ class SensorGUI(tk.Tk):
         self.bat_voltage = tk.StringVar()
         self.signal_strength = tk.StringVar()
         self.firmware_version = tk.StringVar()
+        self.apply_rtd_compensation = tk.BooleanVar(value=False)
+       
 
          # Observable variables
         self.current_temp = tk.StringVar(value="--")
         self.device_id_val = tk.StringVar(value="NOT PAIRED")
-        self.rtd_temp = tk.StringVar(value="--")
         self.thermo_val = tk.StringVar(value="--")
+        self.rtd_temp = tk.StringVar(value="--")
         self.battery_val = tk.StringVar(value="--")
         self.rssi_val = tk.StringVar(value="--")
         self.status_msg = tk.StringVar(value="Ready")
@@ -933,7 +935,6 @@ class SensorGUI(tk.Tk):
         """Show specified frame"""
         frame = self.frames[name]
         frame.tkraise()
-
 
 class DashboardFrame(tk.Frame):
     """Main dashboard display - Full Screen"""
@@ -974,8 +975,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(device_frame, text="DEVICE ID:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
         tk.Label(device_frame, textvariable=controller.transmitter_id_val, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 12, "bold")).pack(side="left", padx=5)
-        
-        
+         
         # Time and status (center)
         center_info = tk.Frame(header, bg="#e6e6e6")
         center_info.pack(side="left", fill="both", expand=True, padx=20)
@@ -1000,8 +1000,6 @@ class DashboardFrame(tk.Frame):
                 font=("Arial", 20, "bold"))
         self.lbl_rssi.pack(anchor="e")
         controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
-        
-        
        
         # Main content area
         self.main_container = tk.Frame(self, bg="#ffffff")
@@ -1111,46 +1109,20 @@ class DashboardFrame(tk.Frame):
         tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
              font=("Arial", 32, "bold")).pack(pady=10, anchor='e')
         tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack(anchor='e')
-
-        # RSSI indicator (placeholder)
-        # rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        # rssi_frame.grid(row=0, column=2, sticky="nsew", padx=10)
-        # tk.Label(rssi_frame, text="SIGNAL STRENGTH", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack()
-        # tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#ccaa00", bg="#ffffff",
-        #          font=("Arial", 28, "bold")).pack(pady=10)
-        # tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack()
         
         # Footer with controls
         footer = tk.Frame(self, bg="#e6e6e6", height=70)
         footer.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
         footer.grid_propagate(False)
         
-
          # Settings button (right)
         tk.Button(footer, text="⚙ PAIRED DEVICE", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
-        
-          
+         
         # ⚙ CONFIGURATION Button - WITH PASSWORD (NEW)
         tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_configuration_password).pack(side="right", padx=20, pady=12)
         
-        # RTD Compensation Checkbox
-        comp_frame = tk.Frame(footer, bg="#e6e6e6")
-        comp_frame.pack(side="left", padx=10, pady=12)
-
-        tk.Checkbutton(
-         comp_frame,
-         text="Apply RTD Compensation",
-         variable=controller.apply_rtd_compensation,
-         bg="#e6e6e6",
-         font=("Arial", 10),
-         activebackground="#e6e6e6",
-         selectcolor="#ffffff",
-         command=self.on_rtd_compensation_changed
-        ).pack()
-
-    # ==================== ADD THESE NEW METHODS ====================
     def check_paired_device_password(self):
         """Check password for Paired Device button"""
         password = simpledialog.askstring("Security", "Enter Password for Paired Device:", show='*')
@@ -1178,9 +1150,6 @@ class DashboardFrame(tk.Frame):
             logger.exception("Failed to open ConnectionSettings")
             messagebox.showerror("Error", f"Unable to open connection settings:\n{e}")
         
-         # -------------------------------
-# RTD Compensation Checkbox Setup
-# -----
 # -------------------------------
 # RTD Compensation Callback
 # -------------------------------
@@ -1219,7 +1188,6 @@ class DashboardFrame(tk.Frame):
                 logger.info("Serial port not available. Hardware command not sent, but software compensation will be applied based on checkbox state.")
         except Exception as e:
             logger.error(f"Error sending RTD command to hardware: {e}", exc_info=True)
-  
 
     def check_battery(self, battery_text):
         # expects strings like "3.50V" or "3.5"
@@ -1315,7 +1283,6 @@ class DashboardFrame(tk.Frame):
         self.controller.status_msg.set("Disconnected")
         messagebox.showinfo("Disconnected", "Port closed")
 
-    
     def update_ports(self):
         """Update available ports"""
         ports = self.controller.port_manager.get_available_ports()
@@ -1323,7 +1290,7 @@ class DashboardFrame(tk.Frame):
         if ports:
             self.combo.current(0)
     
-    
+
     def _read_data(self):
         """Read from serial port"""
         if not self.controller.is_reading or not self.controller.port_manager.is_open:
@@ -1446,8 +1413,6 @@ class DashboardFrame(tk.Frame):
             avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
             self.controller.thermo_val.set(f"{avg_tc:.1f}")
 
-
-
         # Battery: accept battery_voltage (float) or battery_text
         batt = getattr(data, "battery_voltage", None)
         if batt is None:
@@ -1477,7 +1442,6 @@ class DashboardFrame(tk.Frame):
             # if parser gives no rssi, keep existing value
             if self.controller.rssi_val.get() == "":
                 self.controller.rssi_val.set("--")
-       
     
     def _check_alerts(self, data):
         """Check sensor data for alert conditions"""
@@ -1600,60 +1564,7 @@ class DashboardFrame(tk.Frame):
                 self.lbl_status.config(fg="green")
             except:
                 pass
-        #alerts = []
-        
-        # RTD resistance alerts
-        """rtd_resistance = getattr(data, "rtd_resistance", None)
-        if rtd_resistance is not None:
-            if rtd_resistance < 100:
-                alerts.append(("RTD under lower limit. May be short circuit", "red"))
-            elif rtd_resistance > 390:
-                alerts.append(("RTD over upper limit. May be RTD is melt and open", "red"))
-        
-        # Thermocouple voltage alerts
-        tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
-        if tc_voltage_uv is not None:
-            if tc_voltage_uv < 100:
-                alerts.append(("Thermo couple temperature is under lower limit. May be Thermocouple may be short", "red"))
-            elif tc_voltage_uv > 14000:
-                alerts.append(("May be Thermocouple is not connected or short", "red"))
-            elif 100 <= tc_voltage_uv <= 1800:
-                # Special case: show "Thermo is connected" and don't show temperature
-                # (handled in main _process_data method)
-                pass
-        
-        # Battery voltage alerts
-        battery_voltage = getattr(data, "battery_voltage", None)
-        if battery_voltage is not None:
-            if battery_voltage < 3.35:
-                alerts.append(("Battery needs to be charged immediately. Sensor can't continue", "red"))
-            elif battery_voltage < 3.6:
-                alerts.append(("Battery should be charged", "yellow"))
-        
-        # Set status based on alerts
-        if alerts:
-            # Show the most critical alert (red takes precedence)
-            red_alerts = [alert for alert in alerts if alert[1] == "red"]
-            if red_alerts:
-                self.controller.status_msg.set(red_alerts[0][0])
-                self.lbl_status.config(fg="red")
-            else:
-                # Yellow alerts
-                yellow_alerts = [alert for alert in alerts if alert[1] == "yellow"]
-                if yellow_alerts:
-                    self.controller.status_msg.set(yellow_alerts[0][0])
-                    self.lbl_status.config(fg="orange")
-        else:
-            self.controller.status_msg.set("Normal")
-            self.lbl_status.config(fg="green")"""
-   
-    #def check_password(self):
-       # """Check password"""
-        #password = simpledialog.askstring("Security", "Enter Password:", show='*')
-        #if password == "1111":
-           # self.controller.show_frame("SettingsFrame")
-        #elif password is not None:
-            #messagebox.showerror("Access Denied", "Wrong Password")
+       
 
     def check_password(self):
         """Open Connection Settings popup safely"""
@@ -1690,61 +1601,35 @@ class ConnectionSettings(tk.Toplevel):
         self.grab_set()
 
         # ---------- TITLE ----------
-        tk.Label(
-            self,
-            text="USB / COM Port Configuration",
-            font=("Arial", 14, "bold"),
-            bg="#f0f0f0"
+        tk.Label(self,text="USB / COM Port Configuration",font=("Arial", 14, "bold"),bg="#f0f0f0"
         ).pack(pady=15)
 
         frame = tk.Frame(self, bg="#f0f0f0")
         frame.pack(pady=10)
 
-        tk.Label(
-          frame,
-          text="USB Port:",
-           bg="#f0f0f0",
-          font=("Arial", 11)
+        tk.Label(frame,text="USB Port:",bg="#f0f0f0",font=("Arial", 11)
         ).pack(side="left", padx=5)
 
         # USB dropdown
-        self.combo = ttk.Combobox(
-          frame,
-          width=20,
-          state="readonly"
+        self.combo = ttk.Combobox(frame,width=20,state="readonly"
        )
         self.combo.pack(side="left", padx=5)
-
-
 
         # ---------- BUTTONS ----------
         btns = tk.Frame(self, bg="#f0f0f0")
         btns.pack(pady=20)
 
         # create buttons as attributes so we can enable/disable them
-        self.btn_refresh = tk.Button(
-            btns,
-            text="🔄 REFRESH",
-            width=12,
-            command=self.update_ports,
+        self.btn_refresh = tk.Button( btns,text="🔄 REFRESH",width=12,command=self.update_ports,
             state="disabled"
         )
         self.btn_refresh.pack(side="left", padx=5)
 
-        self.btn_connect = tk.Button(
-            btns,
-            text="✓ CONNECT",
-            width=12,
-            command=self.connect,
-            state="disabled"
+        self.btn_connect = tk.Button(btns,text="✓ CONNECT",width=12,command=self.connect,state="disabled"
         )
         self.btn_connect.pack(side="left", padx=5)
 
-        self.btn_disconnect = tk.Button(
-            btns,
-            text="✗ DISCONNECT",
-            width=12,
-            command=self.disconnect,
+        self.btn_disconnect = tk.Button(btns,text="✗ DISCONNECT",width=12,command=self.disconnect,
             state="disabled"
         )
         self.btn_disconnect.pack(side="left", padx=5)
@@ -1753,17 +1638,10 @@ class ConnectionSettings(tk.Toplevel):
         tx_frame = tk.Frame(self, bg="#f0f0f0")
         tx_frame.pack(pady=(5, 10))
 
-        tk.Label(
-        tx_frame,
-        text="Transmitter ID:",
-        bg="#f0f0f0",
-        font=("Arial", 11)
+        tk.Label(tx_frame,text="Transmitter ID:",bg="#f0f0f0",font=("Arial", 11)
         ).pack(side="left", padx=5)
 
-        self.tx_combo = ttk.Combobox(
-        tx_frame,
-        width=20,
-        state="readonly"
+        self.tx_combo = ttk.Combobox(tx_frame,width=20,state="readonly"
     )
         self.tx_combo.pack(side="left", padx=5)
 
@@ -1774,8 +1652,6 @@ class ConnectionSettings(tk.Toplevel):
             "<<ComboboxSelected>>",
         self.on_tx_selected
     )
-
-
 
         # small status / instruction area
         self.status_label = tk.Label(self, text="Locked — enter password to enable controls", bg="#f0f0f0")
@@ -1823,13 +1699,8 @@ class ConnectionSettings(tk.Toplevel):
             messagebox.showerror("Error", "Select a COM port", parent=self)
             return
 
-        # Call dashboard logic
-        # Keep compatibility with DashboardFrame._open_port which expects self.dashboard.combo
         self.dashboard.combo = self.combo
         self.dashboard._open_port()
-
-        # If you want to close the popup after successful connect, uncomment:
-        # self.destroy()
 
     def on_tx_selected(self, event):
         """Handle transmitter ID selection change"""
@@ -1848,17 +1719,13 @@ class ConnectionSettings(tk.Toplevel):
         self.controller.battery_val.set("--")
         self.controller.rssi_val.set("--")
 
-
     def disconnect(self):
         self.dashboard._close_port()
-
 
         # Clear TX dropdown
         self.tx_ids.clear()
         self.tx_combo["values"] = []
         self.selected_tx = None
-
-
 
 class SettingsFrame(tk.Frame):
     """Settings frame - Configuration"""
@@ -1886,7 +1753,7 @@ class SettingsFrame(tk.Frame):
         
         self.tab_buttons = {}
         self.tab_frames = {}
-        tabs = ["General", "Graph", "Transmitter", "Outputs", "Troubleshooting", "History"]
+        tabs = ["General", "Graph", "Transmitter", "Outputs", "Troubleshooting", "History", "RTD Compensation"]
         
         for i, tab_name in enumerate(tabs):
             btn = tk.Button(
@@ -1921,7 +1788,7 @@ class SettingsFrame(tk.Frame):
         self.create_static_row(gen_content, "Sensor Type:", "Type B")
         self.create_combobox_row(gen_content, "Dashboard View:", controller.view_mode, ["Digital View", "Graph View"])
         self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
-        
+
         # ========== TAB 2: GRAPH ==========
         self.tab_frames["Graph"] = tk.Frame(self.content_container, bg="#f0f0f0")
         self.tab_frames["Graph"].grid(row=0, column=0, sticky="nsew")
@@ -2025,9 +1892,31 @@ class SettingsFrame(tk.Frame):
         
         self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
         self.history_list.pack(fill="both", expand=True, pady=10)
+
+        # ========== TAB: RTD COMPENSATION ==========
+        self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["RTD Compensation"].grid(row=0, column=0, sticky="nsew")
+
+        rtd_content = tk.Frame(self.tab_frames["RTD Compensation"], bg="#f0f0f0")
+        rtd_content.pack(fill="both", expand=True, padx=30, pady=30)
+
+        tk.Label(rtd_content,text="RTD Compensation Settings",fg="#333333",
+         bg="#f0f0f0",font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+
+# Checkbox Row
+        rtd_frame = tk.Frame(rtd_content, bg="#f0f0f0")
+        rtd_frame.pack(fill="x", pady=10)
+
+        tk.Label(rtd_frame,text="Enable RTD Compensation:",width=25,anchor="e",
+         bg="#f0f0f0",font=("Arial", 12, "bold")).pack(side="left")
+
+        tk.Checkbutton(rtd_frame,text="Enable",
+            variable=controller.apply_rtd_compensation, command=self.on_rtd_compensation_changed,
+               bg="#f0f0f0",font=("Arial", 11)).pack(side="left", padx=15)
         
         # Show first tab
         self.show_tab("General")
+
         
         # ========== FOOTER BUTTONS ==========
         footer_frame = tk.Frame(self, bg="#f0f0f0", height=60)
@@ -2036,7 +1925,19 @@ class SettingsFrame(tk.Frame):
         
         tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
                   padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)
+    def on_rtd_compensation_changed(self):
+            enabled = self.controller.apply_rtd_compensation.get()
+            print("RTD Compensation:", enabled)
 
+            try:
+               if hasattr(self.controller, "serial") and self.controller.serial:
+                    if enabled:
+                      self.controller.serial.write(b'RTD_ON\n')
+                    else:
+                       self.controller.serial.write(b'RTD_OFF\n')
+            except Exception as e:
+             print("RTD Error:", e)
+    
     def show_tab(self, tab_name):
         """Show selected tab and update button colors"""
         # Hide all tabs
