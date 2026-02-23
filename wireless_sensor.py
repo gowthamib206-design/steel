@@ -127,7 +127,6 @@ class RTDTemperatureTable:
                   186.0867, 186.4510, 186.8152, 187.1793, 187.5432, 187.9070, 188.2707, 188.6343, 188.9978, 189.3611,
                   189.7244, 190.0875, 190.4505, 190.8134, 191.1762, 191.5389, 191.9014, 192.2638, 192.6262, 192.9884,
                   193.3504, 193.7124, 197.3257, 196.9649, 196.6040, 196.2429, 195.8818, 195.5205, 195.1591, 194.7976,
-                  194.4360, 194.0743, 197.3257, 196.9649, 196.6040, 196.2429, 195.8818, 195.5205, 195.1591, 194.7976,
                   194.4360, 194.0743, 194.0743, 194.4360, 194.7976, 195.1591, 195.5205, 195.8818, 196.2429, 196.6040,
                   196.9649, 197.3257, 197.6864, 198.0469, 198.4074, 198.7677, 199.1280, 199.4881, 199.8481, 200.2079,
                   200.5677, 200.9274, 201.2869, 201.6463, 202.0056, 202.3648, 202.7238, 203.0828, 203.4416, 203.8003,
@@ -807,6 +806,7 @@ class DashboardFrame(tk.Frame):
         self.rtd_ready = False  # Flag to indicate RTD & TC data is received
         self.rtd_ready = False
         self.tc_fifo = []   # FIFO buffer for thermocouple averaging
+        self.is_connected = False  # Track connection state for ConnectionSettings persistence
 
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
@@ -936,7 +936,7 @@ class DashboardFrame(tk.Frame):
         self.tc_alert_box.grid(row=0, column=1, sticky="ew", padx=5)
         
         
-        tk.Label(self.tc_alert_box, text="🔴 THERMO COUPLE", fg="#000000", bg="#ffffff",
+        tk.Label(self.tc_alert_box, text="🔴 THERMOCOUPLE", fg="#000000", bg="#ffffff",
                 font=("Arial", 16, "bold")).pack(pady=(8, 5))
         
         self.tc_alert_label = tk.Label(self.tc_alert_box, text="Thermocouple Normal", fg="#006600", bg="#ffffff",
@@ -1188,6 +1188,7 @@ class DashboardFrame(tk.Frame):
                 self.controller.is_reading = True
                 self.controller.serial = self.controller.port_manager.serial
                 self.controller.status_msg.set("Connected")
+                self.is_connected = True
                 
                 # Send RTD setting
                 self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
@@ -1229,6 +1230,7 @@ class DashboardFrame(tk.Frame):
         self.controller.serial = None
         self.controller.status_msg.set("Disconnected")
         messagebox.showinfo("Disconnected", "Port closed")
+        self.is_connected = False
 
     def update_ports(self):
         """Update available ports"""
@@ -1527,7 +1529,7 @@ class DashboardFrame(tk.Frame):
         # Update raw hex for diagnostics
         raw_packet = getattr(data, "raw_packet", None)
         if raw_packet:
-            self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet[:8]))
+            self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
 
         # RSSI
         rssi = getattr(data, "rssi", None)
@@ -1664,30 +1666,42 @@ class DashboardFrame(tk.Frame):
        
 
     def check_password(self):
-        """Open Connection Settings popup safely"""
+        """Open Connection Settings popup safely, reusing window if possible."""
         try:
-          
-          self.connection_window = ConnectionSettings(
-           controller=self.controller,
-           dashboard=self
-         )
-
+            # If window exists and is not destroyed, bring to front
+            if hasattr(self, 'connection_window') and self.connection_window is not None:
+                try:
+                    if self.connection_window.winfo_exists():
+                        self.connection_window.lift()
+                        self.connection_window.focus_force()
+                        return
+                except Exception:
+                    pass
+            # Otherwise, create new window and store reference
+            self.connection_window = ConnectionSettings(
+                controller=self.controller,
+                dashboard=self,
+                is_connected=self.is_connected
+            )
         except Exception as e:
-          logger.exception("Failed to open ConnectionSettings")
-          messagebox.showerror(
-            "Error",
-            f"Unable to open connection settings:\n{e}"
-        )
+            logger.exception("Failed to open ConnectionSettings")
+            messagebox.showerror(
+                "Error",
+                f"Unable to open connection settings:\n{e}"
+            )
 
 
 class ConnectionSettings(tk.Toplevel):
     """COM Port Configuration Popup — opens immediately, requests password, enables controls on success."""
 
-    def __init__(self, controller, dashboard):
+    def __init__(self, controller, dashboard, is_connected=False):
         super().__init__(dashboard)
 
         self.controller = controller
         self.dashboard = dashboard
+
+        # Track connection state
+        self._is_connected = is_connected
 
         self.title("Connection Settings")
         self.geometry("420x250")
@@ -1744,6 +1758,8 @@ class ConnectionSettings(tk.Toplevel):
 
         self.tx_ids = []
         self.selected_tx = None
+        self._is_connected = False
+        self.dashboard.is_connected = False
 
         # If controller has discovered transmitters before opening this window, populate
         if hasattr(self.controller, '_discovered_tx_ids') and self.controller._discovered_tx_ids:
@@ -1796,8 +1812,14 @@ class ConnectionSettings(tk.Toplevel):
 
     def enable_controls(self):
         self.btn_refresh.config(state="normal")
-        self.btn_connect.config(state="normal")
-        self.btn_disconnect.config(state="normal")
+            # Always sync with dashboard connection state
+        self._is_connected = getattr(self.dashboard, 'is_connected', False)
+        if self._is_connected:
+            self.btn_connect.config(state="disabled")
+            self.btn_disconnect.config(state="normal")
+        else:
+            self.btn_connect.config(state="normal")
+            self.btn_disconnect.config(state="disabled")
         self.status_label.config(text="Unlocked — you may connect", fg="green")
         # refresh port list now that controls are enabled
         self.update_ports()
@@ -1813,6 +1835,8 @@ class ConnectionSettings(tk.Toplevel):
         self.btn_disconnect.config(state="normal")
         self.dashboard.combo = self.combo
         self.dashboard._open_port()
+        self._is_connected = True
+        self.dashboard.is_connected = True
 
     def on_tx_selected(self, event):
         """Handle transmitter ID selection change"""
@@ -1835,6 +1859,9 @@ class ConnectionSettings(tk.Toplevel):
         self.dashboard._close_port()
 
         # Enable connect, disable disconnect
+        self._is_connected = False
+        self.dashboard.is_connected = False
+            # After disconnect, update button states
         self.btn_connect.config(state="normal")
         self.btn_disconnect.config(state="disabled")
 
