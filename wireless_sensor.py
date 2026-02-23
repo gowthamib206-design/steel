@@ -187,6 +187,7 @@ class RTDTemperatureTable:
 
 
 class ThermocoupleTable:
+    
        
     @classmethod
     def get_temperature_from_voltage(cls, voltage: float) -> float:
@@ -1263,20 +1264,73 @@ class DashboardFrame(tk.Frame):
                packet,
                enable_rtd_compensation=self.controller.apply_rtd_compensation.get()
            )
-           # print raw values to console
-           try:
-               print("\n[PACKET RECEIVED]", packet)
-               print("Parsed values:")
-               print("  Melt temp:", getattr(data, "temperature", None))
-               print("  RTD temp:", getattr(data, "rtd_temperature", None))
-               print("  RTD resistance:", getattr(data, "rtd_resistance", None))
-               print("  Thermocouple (C):", getattr(data, "thermocouple", None))
-               print("  Thermocouple µV:", getattr(data, "thermocouple_voltage_uv", None))
-               print("  Battery volts:", getattr(data, "battery_voltage", None))
-               print("  RSSI:", getattr(data, "rssi", None))
-               print("  Device ID:", getattr(data, "device_id", None))
-           except Exception as e:
-               logger.warning(f"Failed to print packet values: {e}")
+           # Update all main UI labels with parsed values (including raw)
+           # Device temperature
+           device_temp = getattr(data, "temperature", None)
+           if device_temp is not None:
+               self.controller.current_temp.set(f"{device_temp:.1f}")
+           else:
+               self.controller.current_temp.set("--")
+
+           # RTD temperature
+           rtd_temp = getattr(data, "rtd_temperature", None)
+           if rtd_temp is not None:
+               self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
+           else:
+               self.controller.rtd_temp.set("--")
+
+           # RTD resistance
+           rtd_res = getattr(data, "rtd_resistance", None)
+           if rtd_res is not None:
+               self.controller.rtd_resistance = f"{rtd_res:.2f} Ω"
+           else:
+               self.controller.rtd_resistance = "--"
+
+           # Thermocouple temperature
+           tc = getattr(data, "thermocouple", None)
+           if tc is not None:
+               self.controller.thermo_val.set(f"{tc:.1f}")
+           else:
+               self.controller.thermo_val.set("--")
+
+           # Thermocouple voltage (uV)
+           tc_uv = getattr(data, "thermocouple_voltage_uv", None)
+           if tc_uv is not None:
+               self.controller.tc_uv = f"{tc_uv:.0f} µV"
+           else:
+               self.controller.tc_uv = "--"
+
+           # Battery voltage
+           batt = getattr(data, "battery_voltage", None)
+           if batt is not None:
+               self.controller.battery_val.set(f"{batt:.2f}V")
+               self.controller.bat_voltage.set(f"{batt:.2f}V")
+           else:
+               self.controller.battery_val.set("--")
+               self.controller.bat_voltage.set("--")
+
+           # RSSI
+           rssi = getattr(data, "rssi", None)
+           if rssi is not None:
+               try:
+                   self.controller.rssi_val.set(f"{float(rssi):.0f} dBm")
+               except Exception:
+                   self.controller.rssi_val.set(str(rssi))
+           else:
+               if self.controller.rssi_val.get() == "":
+                   self.controller.rssi_val.set("--")
+
+           # Device ID
+           dev_id = getattr(data, "device_id", None)
+           if dev_id is not None:
+               self.controller.transmitter_id_val.set(str(dev_id))
+
+           # Raw packet
+           raw_packet = getattr(data, "raw_packet", None)
+           if raw_packet:
+               self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
+           else:
+               self.controller.raw_hex.set("--")
         except Exception as e:
            logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {e}", exc_info=True)
            return   # Exit only if parsing completely fails
@@ -1327,6 +1381,13 @@ class DashboardFrame(tk.Frame):
                 if tx_id not in self._discovered_tx_ids:
                     self._discovered_tx_ids.append(tx_id)
                     logger.info(f"Discovered transmitter (offline): {tx_id}")
+                    # If dashboard has no transmitter selected yet, show this one
+                    cur = self.controller.transmitter_id_val.get()
+                    if not cur or cur in ("WAITING", "NOT PAIRED"):
+                        try:
+                            self.controller.transmitter_id_val.set(tx_id)
+                        except Exception:
+                            pass
         except Exception as e:
            logger.error(f"Error in transmitter discovery: {e}", exc_info=True)
         
@@ -1684,6 +1745,18 @@ class ConnectionSettings(tk.Toplevel):
         self.tx_ids = []
         self.selected_tx = None
 
+        # If controller has discovered transmitters before opening this window, populate
+        if hasattr(self.controller, '_discovered_tx_ids') and self.controller._discovered_tx_ids:
+            try:
+                self.tx_ids = list(self.controller._discovered_tx_ids)
+                self.tx_combo['values'] = self.tx_ids
+                if self.tx_ids:
+                    self.tx_combo.current(0)
+                    self.selected_tx = self.tx_ids[0]
+                    self.controller.transmitter_id_val.set(self.selected_tx)
+            except Exception:
+                pass
+
         self.tx_combo.bind(
             "<<ComboboxSelected>>",
         self.on_tx_selected
@@ -1735,6 +1808,9 @@ class ConnectionSettings(tk.Toplevel):
             messagebox.showerror("Error", "Select a COM port", parent=self)
             return
 
+        # Disable connect, enable disconnect
+        self.btn_connect.config(state="disabled")
+        self.btn_disconnect.config(state="normal")
         self.dashboard.combo = self.combo
         self.dashboard._open_port()
 
@@ -1757,6 +1833,10 @@ class ConnectionSettings(tk.Toplevel):
 
     def disconnect(self):
         self.dashboard._close_port()
+
+        # Enable connect, disable disconnect
+        self.btn_connect.config(state="normal")
+        self.btn_disconnect.config(state="disabled")
 
         # Clear TX dropdown
         self.tx_ids.clear()
