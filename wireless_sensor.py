@@ -21,6 +21,16 @@ import re
 import sys
 import os
 import csv
+import sqlite3
+from collections import deque
+import threading
+
+# plotting support (similar to acucast demo)
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+
 from PIL import Image, ImageTk
 
 # Configure logging
@@ -177,192 +187,7 @@ class RTDTemperatureTable:
 
 
 class ThermocoupleTable:
-    """Thermocouple voltage to temperature conversion table (Type K)"""
-    
-    thermocouple_values = [0.000, 0.000, 0.000, -0.001, -0.001, -0.001, -0.001, -0.001, -0.002, -0.002, -0.002,
-                           -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002, -0.003, -0.003, -0.003,
-                           -0.003, -0.003, -0.003, -0.003, -0.003, -0.002, -0.002, -0.002, -0.002, -0.002, -0.002,
-                           -0.002, -0.002, -0.002, -0.002, -0.002, -0.001, -0.001, -0.001, -0.001, -0.001, 0.000,
-                            0.000, 0.000, 0.000, 0.000, 0.000, 0.001, 0.001, 0.001, 0.002, 0.002, 0.002,                             
-                            0.002, 0.003, 0.003, 0.003, 0.004, 0.004, 0.004, 0.005, 0.005, 0.006, 0.006,
-                            0.006, 0.007, 0.007, 0.008, 0.008, 0.009, 0.009, 0.010, 0.010, 0.011, 0.011,
-                            0.011, 0.012, 0.012, 0.013, 0.014, 0.014, 0.015, 0.015, 0.016, 0.017, 0.017,
-                            0.017, 0.018, 0.019, 0.020, 0.020, 0.021, 0.022, 0.022, 0.023, 0.024, 0.025,
-                            0.025, 0.026, 0.026, 0.027, 0.028, 0.029, 0.030, 0.031, 0.031, 0.032, 0.033, 
-                            0.033, 0.034, 0.035, 0.036, 0.037, 0.038, 0.039, 0.040, 0.041, 0.042, 0.043,
-                            0.043, 0.044, 0.045, 0.046, 0.047, 0.048, 0.049, 0.050, 0.051, 0.052, 0.053,
-                            0.053, 0.055, 0.056, 0.057, 0.058, 0.059, 0.060, 0.062, 0.063, 0.064, 0.065,
-                            0.065, 0.066, 0.068, 0.069, 0.070, 0.072, 0.073, 0.074, 0.075, 0.077, 0.078,
-                            0.078, 0.079, 0.081, 0.082, 0.083, 0.084, 0.085, 0.086, 0.087, 0.089, 0.091,  
-                            0.092, 0.094, 0.095, 0.096, 0.098, 0.099, 0.101, 0.102, 0.104, 0.106, 0.107,
-                            0.107, 0.109, 0.110, 0.112, 0.113, 0.115, 0.117, 0.118, 0.120, 0.122, 0.123,
-                            0.123, 0.125, 0.127, 0.128, 0.130, 0.132, 0.134, 0.135, 0.137, 0.139, 0.141,
-                            0.141, 0.142, 0.144, 0.146, 0.148, 0.150, 0.151, 0.153, 0.155, 0.157, 0.159,
-                            0.159, 0.161, 0.163, 0.165, 0.166, 0.168, 0.170, 0.172, 0.174, 0.176, 0.178,
-                            0.178, 0.180, 0.182, 0.184, 0.186, 0.188, 0.190, 0.192, 0.195, 0.197, 0.199,
-                            0.199, 0.201, 0.203, 0.205, 0.207, 0.209, 0.212, 0.214, 0.216, 0.218, 0.220,
-                            0.220, 0.222, 0.225, 0.227, 0.229, 0.231, 0.234, 0.236, 0.238, 0.241, 0.243,
-                            0.243, 0.245, 0.248, 0.250, 0.252, 0.255, 0.257, 0.259, 0.262, 0.264, 0.267,
-                            0.267, 0.270, 0.273, 0.276, 0.279, 0.282, 0.285, 0.288, 0.291, 0.294, 0.297,
-                            0.291, 0.294, 0.296, 0.299, 0.301, 0.304, 0.307, 0.309, 0.312, 0.314, 0.317,
-                            0.317, 0.320, 0.322, 0.325, 0.328, 0.330, 0.333, 0.336, 0.338, 0.341, 0.344,
-                            0.344, 0.347, 0.349, 0.352, 0.355, 0.358, 0.360, 0.363, 0.366, 0.369, 0.372,
-                            0.372, 0.375, 0.377, 0.380, 0.383, 0.386, 0.389, 0.392, 0.395, 0.398, 0.401,
-                            0.401, 0.404, 0.407, 0.410, 0.413, 0.416, 0.419, 0.422, 0.425, 0.428, 0.431,
-                            0.431, 0.434, 0.437, 0.440, 0.443, 0.446, 0.449, 0.452, 0.455, 0.458, 0.462,
-                            0.462, 0.465, 0.468, 0.471, 0.474, 0.478, 0.481, 0.484, 0.487, 0.490, 0.494,
-                            0.494, 0.497, 0.500, 0.503, 0.507, 0.510, 0.513, 0.517, 0.520, 0.523, 0.527,
-                            0.527, 0.530, 0.533, 0.537, 0.540, 0.544, 0.547, 0.550, 0.554, 0.557, 0.561,
-                            0.561, 0.564, 0.568, 0.571, 0.575, 0.578, 0.582, 0.585, 0.589, 0.592, 0.596,
-                            0.596, 0.599, 0.603, 0.607, 0.610, 0.614, 0.617, 0.621, 0.625, 0.628, 0.632,
-                            0.632, 0.636, 0.639, 0.643, 0.647, 0.650, 0.654, 0.658, 0.662, 0.665, 0.669,
-                            0.669, 0.673, 0.677, 0.680, 0.684, 0.688, 0.692, 0.696, 0.700, 0.703, 0.707,
-                            0.707, 0.711, 0.715, 0.719, 0.723, 0.727, 0.731, 0.735, 0.738, 0.742, 0.746,
-                            0.746, 0.750, 0.754, 0.758, 0.762, 0.766, 0.770, 0.774, 0.778, 0.782, 0.786,
-                            0.787, 0.791, 0.795, 0.799, 0.803, 0.807, 0.811, 0.815, 0.819, 0.824, 0.828,
-                            0.828, 0.832, 0.836, 0.840, 0.844, 0.849, 0.853, 0.857, 0.861, 0.866, 0.870,
-                            0.870, 0.874, 0.878, 0.883, 0.887, 0.891, 0.896, 0.900, 0.904, 0.909, 0.913,
-                            0.913, 0.917, 0.922, 0.926, 0.930, 0.935, 0.939, 0.944, 0.948, 0.953, 0.957,
-                            0.957, 0.961, 0.966, 0.970, 0.975, 0.979, 0.984, 0.988, 0.993, 0.997, 1.002,
-                            1.002, 1.007, 1.011, 1.016, 1.020, 1.025, 1.030, 1.034, 1.039, 1.043, 1.048,
-                            1.048, 1.053, 1.057, 1.062, 1.067, 1.071, 1.076, 1.081, 1.086, 1.090, 1.095,
-                            1.095, 1.100, 1.105, 1.109, 1.114, 1.119, 1.124, 1.129, 1.133, 1.138, 1.143,
-                            1.143, 1.148, 1.153, 1.158, 1.163, 1.167, 1.172, 1.177, 1.182, 1.187, 1.192,
-                            1.192, 1.197, 1.202, 1.207, 1.212, 1.217, 1.222, 1.227, 1.232, 1.237, 1.242,   
-                            1.242, 1.247, 1.252, 1.257, 1.262, 1.267, 1.272, 1.277, 1.282, 1.288, 1.293,
-                            1.293, 1.298, 1.303, 1.308, 1.313, 1.318, 1.324, 1.329, 1.334, 1.339, 1.344,
-                            1.344, 1.350, 1.355, 1.360, 1.365, 1.371, 1.376, 1.381, 1.387, 1.392, 1.397,
-                            1.397, 1.402, 1.408, 1.413, 1.418, 1.424, 1.429, 1.435, 1.440, 1.445, 1.451,
-                            1.451, 1.456, 1.462, 1.467, 1.472, 1.478, 1.483, 1.489, 1.494, 1.500, 1.505,
-                            1.505, 1.511, 1.516, 1.522, 1.527, 1.533, 1.539, 1.544, 1.550, 1.555, 1.561,
-                            1.561, 1.566, 1.572, 1.578, 1.583, 1.589, 1.595, 1.600, 1.606, 1.612, 1.617,
-                            1.617, 1.623, 1.629, 1.634, 1.640, 1.646, 1.652, 1.657, 1.663, 1.669, 1.675,
-                            1.675, 1.680, 1.686, 1.692, 1.698, 1.704, 1.709, 1.715, 1.721, 1.727, 1.733,
-                            1.733, 1.739, 1.745, 1.750, 1.756, 1.762, 1.768, 1.774, 1.780, 1.786, 1.792,
-                            1.792, 1.798, 1.804, 1.810, 1.816, 1.822, 1.828, 1.834, 1.840, 1.846, 1.852,
-                            1.852, 1.858, 1.864, 1.870, 1.876, 1.882, 1.888, 1.894, 1.901, 1.907, 1.913,
-                            1.913, 1.919, 1.925, 1.931, 1.937, 1.944, 1.950, 1.956, 1.962, 1.968, 1.975,
-                            1.975, 1.981, 1.987, 1.993, 1.999, 2.006, 2.012, 2.018, 2.025, 2.031, 2.037,
-                            2.037, 2.043, 2.050, 2.056, 2.062, 2.069, 2.075, 2.082, 2.088, 2.094, 2.101,
-                            2.101, 2.107, 2.113, 2.120, 2.126, 2.133, 2.139, 2.146, 2.152, 2.158, 2.165,
-                            2.165, 2.171, 2.178, 2.184, 2.191, 2.197, 2.204, 2.210, 2.217, 2.224, 2.230,
-                            2.230, 2.237, 2.243, 2.250, 2.256, 2.263, 2.270, 2.276, 2.283, 2.289, 2.296,
-                            2.296, 2.303, 2.309, 2.316, 2.323, 2.329, 2.336, 2.343, 2.350, 2.356, 2.363,
-                            2.363, 2.370, 2.376, 2.383, 2.390, 2.397, 2.403, 2.410, 2.417, 2.424, 2.431,
-                            2.431, 2.437, 2.444, 2.451, 2.458, 2.465, 2.472, 2.479, 2.485, 2.492, 2.499,
-                            2.499, 2.506, 2.513, 2.520, 2.527, 2.534, 2.541, 2.548, 2.555, 2.562, 2.569,
-                            2.569, 2.576, 2.583, 2.590, 2.597, 2.604, 2.611, 2.618, 2.625, 2.632, 2.639,
-                            2.639, 2.646, 2.653, 2.660, 2.667, 2.674, 2.681, 2.688, 2.696, 2.703, 2.710,
-                            2.710, 2.717, 2.724, 2.731, 2.739, 2.746, 2.753, 2.760, 2.768, 2.775, 2.782,
-                            2.782, 2.789, 2.796, 2.803, 2.811, 2.818, 2.825, 2.833, 2.840, 2.847, 2.854,
-                            2.854, 2.862, 2.869, 2.876, 2.884, 2.891, 2.898, 2.906, 2.913, 2.921, 2.928,
-                            2.928, 2.935, 2.943, 2.950, 2.958, 2.965, 2.973, 2.980, 2.987, 2.995, 3.002,
-                            3.002, 3.010, 3.017, 3.025, 3.032, 3.040, 3.047, 3.055, 3.062, 3.070, 3.078,
-                            3.078, 3.085, 3.093, 3.100, 3.108, 3.116, 3.123, 3.131, 3.138, 3.146, 3.154,
-                            3.154, 3.161, 3.169, 3.177, 3.184, 3.192, 3.200, 3.207, 3.215, 3.223, 3.230,
-                            3.230, 3.238, 3.246, 3.254, 3.261, 3.269, 3.277, 3.285, 3.292, 3.300, 3.308,
-                            3.308, 3.316, 3.324, 3.331, 3.339, 3.347, 3.355, 3.363, 3.371, 3.379, 3.386,
-                            3.386, 3.394, 3.402, 3.410, 3.418, 3.426, 3.434, 3.442, 3.450, 3.458, 3.466,
-                            3.466, 3.474, 3.482, 3.490, 3.498, 3.506, 3.514, 3.522, 3.530, 3.538, 3.546,
-                            3.546, 3.554, 3.562, 3.570, 3.578, 3.586, 3.594, 3.602, 3.610, 3.618, 3.626,
-                            3.626, 3.634, 3.643, 3.651, 3.659, 3.667, 3.675, 3.683, 3.692, 3.700, 3.708,
-                            3.708, 3.716, 3.724, 3.732, 3.741, 3.749, 3.757, 3.765, 3.774, 3.782, 3.790,
-                            3.790, 3.798, 3.807, 3.815, 3.823, 3.832, 3.840, 3.848, 3.857, 3.865, 3.873,
-                            3.873, 3.882, 3.890, 3.898, 3.907, 3.915, 3.923, 3.932, 3.940, 3.949, 3.957,
-                            3.957, 3.965, 3.974, 3.982, 3.991, 3.999, 4.008, 4.016, 4.024, 4.033, 4.041,
-                            4.041, 4.050, 4.058, 4.067, 4.075, 4.084, 4.093, 4.101, 4.110, 4.118, 4.127,
-                            4.127, 4.135, 4.144, 4.152, 4.161, 4.170, 4.178, 4.187, 4.195, 4.204, 4.213,
-                            4.213, 4.221, 4.230, 4.239, 4.247, 4.256, 4.265, 4.273, 4.282, 4.291, 4.299,
-                            4.299, 4.308, 4.317, 4.326, 4.334, 4.343, 4.352, 4.360, 4.369, 4.378, 4.387,
-                            4.387, 4.396, 4.404, 4.413, 4.422, 4.431, 4.440, 4.448, 4.457, 4.466, 4.475,
-                            4.475, 4.484, 4.493, 4.501, 4.510, 4.519, 4.528, 4.537, 4.546, 4.555, 4.564,
-                            4.564, 4.573, 4.582, 4.591, 4.599, 4.608, 4.617, 4.626, 4.635, 4.644, 4.653,
-                            4.653, 4.662, 4.671, 4.680, 4.689, 4.698, 4.707, 4.716, 4.725, 4.734, 4.743,
-                            4.743, 4.753, 4.762, 4.771, 4.780, 4.789, 4.798, 4.807, 4.816, 4.825, 4.834, 
-                            4.834, 4.843, 4.853, 4.862, 4.871, 4.880, 4.889, 4.898, 4.908, 4.917, 4.926,
-                            4.926, 4.935, 4.944, 4.954, 4.963, 4.972, 4.981, 4.990, 5.000, 5.009, 5.018,
-                            5.018, 5.027, 5.037, 5.046, 5.055, 5.065, 5.074, 5.083, 5.092, 5.102, 5.111,
-                            5.111, 5.120, 5.130, 5.139, 5.148, 5.158, 5.167, 5.176, 5.186, 5.195, 5.205,
-                            5.205, 5.214, 5.223, 5.233, 5.242, 5.252, 5.261, 5.270, 5.280, 5.289, 5.299,
-                            5.299, 5.308, 5.318, 5.327, 5.337, 5.346, 5.356, 5.365, 5.375, 5.384, 5.394,
-                            5.394, 5.403, 5.413, 5.422, 5.432, 5.441, 5.451, 5.460, 5.470, 5.480, 5.489,
-                            5.489, 5.499, 5.508, 5.518, 5.528, 5.537, 5.547, 5.556, 5.566, 5.576, 5.585,
-                            5.585, 5.595, 5.605, 5.614, 5.624, 5.634, 5.643, 5.653, 5.663, 5.672, 5.682,
-                            5.682, 5.692, 5.702, 5.711, 5.721, 5.731, 5.740, 5.750, 5.760, 5.770, 5.780,
-                            5.780, 5.789, 5.799, 5.809, 5.819, 5.828, 5.838, 5.848, 5.858, 5.868, 5.878,
-                            5.878, 5.887, 5.897, 5.907, 5.917, 5.927, 5.937, 5.947, 5.956, 5.966, 5.976,
-                            5.976, 5.986, 5.996, 6.006, 6.016, 6.026, 6.036, 6.046, 6.055, 6.065, 6.075,
-                            6.075, 6.085, 6.095, 6.105, 6.115, 6.125, 6.135, 6.145, 6.155, 6.165, 6.175,
-                            6.175, 6.185, 6.195, 6.205, 6.215, 6.225, 6.235, 6.245, 6.256, 6.266, 6.276,
-                            6.276, 6.286, 6.296, 6.306, 6.316, 6.326, 6.336, 6.346, 6.356, 6.367, 6.377,
-                            6.377, 6.387, 6.397, 6.407, 6.417, 6.427, 6.438, 6.448, 6.458, 6.468, 6.478,
-                            6.478, 6.488, 6.499, 6.509, 6.519, 6.529, 6.539, 6.550, 6.560, 6.570, 6.580,
-                            6.580, 6.591, 6.601, 6.611, 6.621, 6.632, 6.642, 6.652, 6.663, 6.673, 6.683,
-                            6.683, 6.693, 6.704, 6.714, 6.724, 6.735, 6.745, 6.755, 6.766, 6.776, 6.786,
-                            6.786, 6.797, 6.807, 6.818, 6.828, 6.838, 6.849, 6.859, 6.869, 6.880, 6.890,
-                            6.890, 6.901, 6.911, 6.922, 6.932, 6.942, 6.953, 6.963, 6.974, 6.984, 6.995,
-                            6.995, 7.005, 7.016, 7.026, 7.037, 7.047, 7.058, 7.068, 7.079, 7.089, 7.100,
-                            7.100, 7.110, 7.121, 7.131, 7.142, 7.152, 7.163, 7.173, 7.184, 7.194, 7.205,
-                            7.205, 7.216, 7.226, 7.237, 7.247, 7.258, 7.269, 7.279, 7.290, 7.300, 7.311,
-                            7.311, 7.322, 7.332, 7.343, 7.353, 7.364, 7.375, 7.385, 7.396, 7.407, 7.417,
-                            7.417, 7.428, 7.439, 7.449, 7.460, 7.471, 7.482, 7.492, 7.503, 7.514, 7.524,
-                            7.524, 7.535, 7.546, 7.557, 7.567, 7.578, 7.589, 7.600, 7.610, 7.621, 7.632,
-                            7.632, 7.643, 7.653, 7.664, 7.675, 7.686, 7.697, 7.707, 7.718, 7.729, 7.740,
-                            7.740, 7.751, 7.761, 7.772, 7.783, 7.794, 7.805, 7.816, 7.827, 7.837, 7.848,
-                            7.848, 7.859, 7.870, 7.881, 7.892, 7.903, 7.914, 7.924, 7.935, 7.946, 7.957,
-                            7.957, 7.968, 7.979, 7.990, 8.001, 8.012, 8.023, 8.034, 8.045, 8.056, 8.066,
-                            8.066, 8.077, 8.088, 8.099, 8.110, 8.121, 8.132, 8.143, 8.154, 8.165, 8.176,
-                            8.176, 8.187, 8.198, 8.209, 8.220, 8.231, 8.242, 8.253, 8.264, 8.275, 8.286,
-                            8.286, 8.298, 8.309, 8.320, 8.331, 8.342, 8.353, 8.364, 8.375, 8.386, 8.397,
-                            8.397, 8.408, 8.419, 8.430, 8.441, 8.453, 8.464, 8.475, 8.486, 8.497, 8.508, 
-                            8.508, 8.519, 8.530, 8.542, 8.553, 8.564, 8.575, 8.586, 8.597, 8.608, 8.620,
-                            8.620, 8.631, 8.642, 8.653, 8.664, 8.675, 8.687, 8.698, 8.709, 8.720, 8.731,
-                            8.731, 8.743, 8.754, 8.765, 8.776, 8.787, 8.799, 8.810, 8.821, 8.832, 8.844,
-                            8.844, 8.855, 8.866, 8.877, 8.889, 8.900, 8.911, 8.922, 8.934, 8.945, 8.956,
-                            8.956, 8.967, 8.979, 8.990, 9.001, 9.013, 9.024, 9.035, 9.047, 9.058, 9.069,
-                            9.069, 9.080, 9.092, 9.103, 9.114, 9.126, 9.137, 9.148, 9.160, 9.171, 9.182,
-                            9.182, 9.194, 9.205, 9.216, 9.228, 9.239, 9.251, 9.262, 9.273, 9.285, 9.296,
-                            9.296, 9.307, 9.319, 9.330, 9.342, 9.353, 9.364, 9.376, 9.387, 9.398, 9.410,
-                            9.410, 9.421, 9.433, 9.444, 9.456, 9.467, 9.478, 9.490, 9.501, 9.513, 9.524,
-                            9.524, 9.536, 9.547, 9.558, 9.570, 9.581, 9.593, 9.604, 9.616, 9.627, 9.639,
-                            9.639, 9.650, 9.662, 9.673, 9.684, 9.696, 9.707, 9.719, 9.730, 9.742, 9.753,
-                            9.753, 9.765, 9.776, 9.788, 9.799, 9.811, 9.822, 9.834, 9.845, 9.857, 9.868,
-                            9.868, 9.880, 9.891, 9.903, 9.914, 9.926, 9.937, 9.949, 9.961, 9.972, 9.984,
-                            9.984, 9.995, 10.007, 10.018, 10.030, 10.041, 10.053, 10.064, 10.076, 10.088, 10.099,
-                            10.099, 10.111, 10.122, 10.134, 10.145, 10.157, 10.168, 10.180, 10.192, 10.203, 10.215,
-                            10.215, 10.226, 10.238, 10.249, 10.261, 10.273, 10.284, 10.296, 10.307, 10.319, 10.331,
-                            10.331, 10.342, 10.354, 10.365, 10.377, 10.389, 10.400, 10.412, 10.423, 10.435, 10.447,
-                            10.447, 10.458, 10.470, 10.482, 10.493, 10.505, 10.516, 10.528, 10.540, 10.551, 10.563,
-                            10.563, 10.575, 10.586, 10.598, 10.609, 10.621, 10.633, 10.644, 10.656, 10.668, 10.679,
-                            10.679, 10.691, 10.703, 10.714, 10.726, 10.738, 10.749, 10.761, 10.773, 10.784, 10.796,
-                            10.796, 10.808, 10.819, 10.831, 10.843, 10.854, 10.866, 10.877, 10.889, 10.901, 10.913,
-                            10.913, 10.924, 10.936, 10.948, 10.959, 10.971, 10.983, 10.994, 11.006, 11.018, 11.029,
-                            11.029, 11.041, 11.053, 11.064, 11.076, 11.088, 11.099, 11.111, 11.123, 11.134, 11.146,
-                            11.146, 11.158, 11.169, 11.181, 11.193, 11.205, 11.216, 11.228, 11.240, 11.251, 11.263,
-                            11.263, 11.275, 11.286, 11.298, 11.310, 11.321, 11.333, 11.345, 11.357, 11.368, 11.380,
-                            11.380, 11.392, 11.403, 11.415, 11.427, 11.438, 11.450, 11.462, 11.474, 11.485, 11.497,
-                            11.497, 11.509, 11.520, 11.532, 11.544, 11.555, 11.567, 11.579, 11.591, 11.602, 11.614,
-                            11.614, 11.626, 11.637, 11.649, 11.661, 11.673, 11.684, 11.696, 11.708, 11.719, 11.731,
-                            11.731, 11.743, 11.754, 11.766, 11.778, 11.790, 11.801, 11.813, 11.825, 11.836, 11.848,
-                            11.848, 11.860, 11.871, 11.883, 11.895, 11.906, 11.918, 11.930, 11.941, 11.953, 11.965,
-                            11.965, 11.976, 11.988, 12.000, 12.012, 12.023, 12.035, 12.047, 12.058, 12.070, 12.082,
-                            12.082, 12.093, 12.105, 12.117, 12.128, 12.140, 12.152, 12.164, 12.175, 12.187, 12.199,
-                            12.199, 12.210, 12.222, 12.234, 12.245, 12.257, 12.269, 12.280, 12.292, 12.304, 12.316,
-                            12.316, 12.327, 12.339, 12.351, 12.362, 12.374, 12.386, 12.397, 12.409, 12.421, 12.432,
-                            12.432, 12.444, 12.456, 12.468, 12.479, 12.491, 12.503, 12.514, 12.526, 12.538, 12.549,
-                            12.549, 12.561, 12.573, 12.584, 12.596, 12.608, 12.619, 12.631, 12.643, 12.655, 12.666,
-                            12.666, 12.677, 12.689, 12.701, 12.712, 12.724, 12.736, 12.747, 12.759, 12.770, 12.782,
-                            12.782, 12.794, 12.805, 12.817, 12.829, 12.840, 12.852, 12.863, 12.875, 12.887, 12.898,
-                            12.898, 12.910, 12.921, 12.933, 12.945, 12.956, 12.968, 12.980, 12.991, 13.003, 13.014,
-                            13.014, 13.026, 13.037, 13.049, 13.061, 13.072, 13.084, 13.095, 13.107, 13.119, 13.130, 
-                            13.130, 13.142, 13.153, 13.165, 13.176, 13.188, 13.200, 13.211, 13.223, 13.234, 13.246,
-                            13.246, 13.257, 13.269, 13.280, 13.292, 13.304, 13.315, 13.327, 13.338, 13.350, 13.361,
-                            13.361, 13.373, 13.384, 13.396, 13.407, 13.419, 13.430, 13.442, 13.453, 13.465, 13.476,
-                            13.476, 13.488, 13.499, 13.511, 13.522, 13.534, 13.545, 13.557, 13.568, 13.580, 13.591,
-                            13.591, 13.603, 13.614, 13.626, 13.637, 13.649, 13.660, 13.672, 13.683, 13.694, 13.706,
-                            13.706, 13.717, 13.729, 13.740, 13.752, 13.763, 13.775, 13.786, 13.797, 13.809, 13.820 
-             ]                  
-    
+       
     @classmethod
     def get_temperature_from_voltage(cls, voltage: float) -> float:
         """Convert thermocouple voltage to temperature"""
@@ -450,16 +275,7 @@ def voltage_uV_to_temperature_C(uV):
     # polynomial expects millivolts
     v = uV 
 
-    # expand polynomial manually (no Horner’s method, no helper function)
-    """temp_C = (coeffs[0]
-              + coeffs[1] * v
-              + coeffs[2] * (v ** 2)
-              + coeffs[3] * (v ** 3)
-              + coeffs[4] * (v ** 4)
-              + coeffs[5] * (v ** 5)
-              + coeffs[6] * (v ** 6)
-              + coeffs[7] * (v ** 7)
-              + coeffs[8] * (v ** 8))"""
+   
     terms = []
     for i in range(len(coeffs)):
      c = coeffs[i]
@@ -509,23 +325,7 @@ RANGE_TEMP_HIGH_C = (630.615, 1820.0)
 
 
 def temperature_C_to_voltage_uV(temperature_C: float) -> float:
-    """
-    Convert temperature (°C) to thermocouple voltage (µV) using polynomial.
-    
-    Uses Type B thermocouple reference equation:
-    E = Σ c_i(t_90)^i
-    
-    where:
-        E is voltage in microvolts (µV)
-        t_90 is temperature in degrees Celsius (°C)
-        c_i are polynomial coefficients
-    
-    Args:
-        temperature_C: Temperature in degrees Celsius
-        
-    Returns:
-        Voltage in microvolts (µV)
-    """
+   
     # Choose coefficients based on temperature range
     if RANGE_TEMP_LOW_C[0] <= temperature_C <= RANGE_TEMP_LOW_C[1]:
         coeffs = COEFFS_TEMP_TO_UV_LOW
@@ -726,22 +526,7 @@ class SensorDataParser:
     
     @staticmethod
     def parse_packet(packet: List[int], enable_rtd_compensation: bool = False) -> Optional[SensorData]:
-        """Parse packet and extract sensor data
         
-        Byte layout:
-        0: Frame start marker (\r). but this is not included in the packet passed to this method
-        0-3: Temperature (4 bytes)
-        4: RSSI
-        5: Packet sequence
-        6-9: Device ID (4 bytes)
-        10-11: RTD (2 bytes)
-        12-13: Thermocouple (2 bytes)
-        14-15: Battery voltage (2 bytes)
-        
-        Args:
-            packet: The raw packet data
-            enable_rtd_compensation: If True, apply RTD compensation to thermocouple temperature
-        """
         if not packet or len(packet) != 16:
             logger.error(f"Invalid packet length: {len(packet) if packet else 0}")
             raise ValueError(SensorErrorType.INVALID_PACKET_LENGTH.value)
@@ -872,8 +657,10 @@ class SensorGUI(tk.Tk):
 
         self.sel = tk.StringVar(value="")
         self.apply_rtd_compensation = tk.BooleanVar(value=True)  # Checkbox selected by default
-        self.station_name = tk.StringVar(value="")
+        self.station_name = tk.StringVar(value="LADLE STATION 01")
         self.view_mode = tk.StringVar(value="Digital View")
+        # when view mode changes update dashboard layout
+        self.view_mode.trace_add('write', lambda *args: self.frames.get("DashboardFrame").refresh_layout() if "DashboardFrame" in self.frames else None)
         self.operator_name = tk.StringVar(value="")
         self.ip_address = tk.StringVar(value="")
         self.port_number = tk.StringVar(value="")
@@ -893,7 +680,24 @@ class SensorGUI(tk.Tk):
         self.signal_strength = tk.StringVar()
         self.firmware_version = tk.StringVar()
         self.apply_rtd_compensation = tk.BooleanVar(value=False)
-       
+        
+        # --- Database & logging setup ---
+        self.init_db()
+        
+        # Graph/History data variables
+        self.buffer_size = 20
+        self.temp_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.time_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.history_display = deque(maxlen=30)
+        self.x_counter = 0
+
+        # Graph settings (used from settings tab)
+        self.time_scale_str = tk.StringVar(value="1 Minute")
+        # adjust buffer length when scale changes
+        self.time_scale_str.trace_add('write', lambda *args: self.update_buffer_size())
+        self.y_axis_mode = tk.StringVar(value="Autoscale")
+        self.y_min = tk.DoubleVar(value=1500.0)
+        self.y_max = tk.DoubleVar(value=1600.0)
 
          # Observable variables
         self.current_temp = tk.StringVar(value="--")
@@ -931,10 +735,59 @@ class SensorGUI(tk.Tk):
         
         self.show_frame("DashboardFrame")
     
+    # --- database & history helpers copied from ACUCAST demo ---
+    def init_db(self):
+        """Initialize SQLite database and create table if needed"""
+        self.conn = sqlite3.connect("temperature_logs.db", check_same_thread=False)
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS measurements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                temperature REAL,
+                cjc_temp REAL,
+                battery INTEGER,
+                rssi INTEGER,
+                status TEXT
+            )
+        """)
+        self.conn.commit()
+
+    def log_to_db(self, temp, cjc, bat, rssi, status):
+        """Insert new record into DB (non-blocking)"""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            self.cursor.execute("INSERT INTO measurements (timestamp, temperature, cjc_temp, battery, rssi, status) VALUES (?, ?, ?, ?, ?, ?)",
+                                (ts, temp, cjc, bat, rssi, status))
+            # commit every 10 records instead of every single one
+            if not hasattr(self, '_commit_counter'):
+                self._commit_counter = 0
+            self._commit_counter += 1
+            if self._commit_counter >= 10:
+                self.conn.commit()
+                self._commit_counter = 0
+        except Exception as e:
+            logger.error(f"Database error: {e}")
+
+    def update_buffer_size(self):
+        """Recalculate in-memory buffers when time scale changes"""
+        scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "30 Minutes": 1800, "1 Hour": 3600}
+        seconds = scale_map.get(self.time_scale_str.get(), 60)
+        new_len = int(seconds / 3)
+        if new_len != self.buffer_size:
+            self.buffer_size = new_len
+            self.temp_data = deque(self.temp_data, maxlen=self.buffer_size)
+            self.time_data = deque(self.time_data, maxlen=self.buffer_size)
+
     def show_frame(self, name):
         """Show specified frame"""
         frame = self.frames[name]
         frame.tkraise()
+        # after raising, give the new page a chance to update its layout or data
+        if name == "DashboardFrame" and hasattr(frame, "refresh_layout"):
+            frame.refresh_layout()
+        if name == "SettingsFrame" and hasattr(frame, "refresh_history"):
+            frame.refresh_history()
 
 class DashboardFrame(tk.Frame):
     """Main dashboard display - Full Screen"""
@@ -967,7 +820,7 @@ class DashboardFrame(tk.Frame):
         left_info = tk.Frame(header, bg="#e6e6e6")
         left_info.pack(side="left", fill="y", padx=10, pady=15)
         
-        tk.Label(left_info, text="WIRELESS SENSOR - LADLE STATION", fg="#333333", bg="#e6e6e6", 
+        tk.Label(left_info, textvariable=controller.station_name, fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 18, "bold")).pack(anchor="w")
         
         device_frame = tk.Frame(left_info, bg="#e6e6e6")
@@ -1007,6 +860,20 @@ class DashboardFrame(tk.Frame):
         self.main_container.grid_rowconfigure(0, weight=1)
         self.main_container.grid_columnconfigure(0, weight=1)
         
+        # Prepare graph frame (hidden until needed)
+        self.graph_frame = tk.Frame(self, bg="white")
+        self.fig = Figure(figsize=(8, 5), dpi=100)
+        self.fig.patch.set_facecolor('#ffffff')
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_title("Process Trend (Live)", fontsize=14, color='#666666')
+        self.ax.set_facecolor('#f9f9f9')
+        self.ax.grid(True, linestyle='--', alpha=0.5)
+        self.line, = self.ax.plot([], [], 'r-', linewidth=3)
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.current_temp,
+                                          bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
+
         # Temperature display area (large)
         temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
         temp_display_area.grid(row=0, column=0, sticky="nsew")
@@ -1247,8 +1114,47 @@ class DashboardFrame(tk.Frame):
         self.lbl_date.config(text=now.strftime("%d-%b-%Y"))
         self.after(1000, self.update_clock)
 
+    def refresh_layout(self):
+        """Toggle between digital and graph view depending on controller setting"""
+        # hide both
+        try:
+            self.main_container.grid_forget()
+        except Exception:
+            pass
+        try:
+            self.graph_frame.grid_forget()
+        except Exception:
+            pass
+        self.lbl_graph_overlay.place_forget()
+        if self.controller.view_mode.get() == "Digital View":
+            self.main_container.grid(row=1, column=0, sticky="nsew")
+        else:
+            self.graph_frame.grid(row=1, column=0, sticky="nsew")
+            self.lbl_graph_overlay.place(relx=0.95, rely=0.05, anchor="ne")
+            self.update_graph()
+
+    def update_graph(self):
+        """Redraw live graph"""
+        x = list(self.controller.time_data)
+        y = list(self.controller.temp_data)
+        if not x:
+            return
+        try:
+            self.line.set_data(x, y)
+            self.ax.relim()
+            if self.controller.y_axis_mode.get() == "Manual":
+                try:
+                    self.ax.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
+                except Exception:
+                    pass
+            else:
+                self.ax.autoscale(enable=True, axis='y')
+            self.canvas.draw()
+        except Exception:
+            pass
+
     def _open_port(self):
-        """Open selected port (combo must be set by ConnectionSettings before calling)."""
+        """Open selected port in background thread (non-blocking)."""
         sel = getattr(self, "combo", None)
         port_name = None
         if sel:
@@ -1256,22 +1162,62 @@ class DashboardFrame(tk.Frame):
         if not port_name:
             messagebox.showerror("Error", "Select a port")
             return
-        # call the controller's port manager
-        success, msg = self.controller.port_manager.open_port(port_name)
-        if success:
-            self.controller.com_port_val.set(port_name)
-            self.controller.is_paired.set(True)
-            self.controller.is_reading = True
-            # store a reference to serial if available
-            self.controller.serial = self.controller.port_manager.serial
-            self.controller.status_msg.set("Connected")
-            # send RTD setting on connect
-            self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
-            # start read loop (non-blocking)
-            self._read_data()
-            messagebox.showinfo("Connected", msg)
-        else:
-            messagebox.showerror("Error", msg)
+        
+        # Update status in ConnectionSettings window if available
+        conn_window = getattr(self, "connection_window", None)
+        if conn_window and hasattr(conn_window, "status_label"):
+            conn_window.status_label.config(text=f"Connecting to {port_name}...", fg="orange")
+        
+        logger.info(f"Attempting to connect to {port_name}...")
+        
+        # Run port opening in background thread to avoid freezing UI
+        thread = threading.Thread(target=self._open_port_bg, args=(port_name,), daemon=True)
+        thread.start()
+
+    def _open_port_bg(self, port_name):
+        """Background thread: open port and initialize connection"""
+        try:
+            # This is blocking, so it runs in background
+            success, msg = self.controller.port_manager.open_port(port_name)
+            
+            if success:
+                # Update UI via main thread
+                self.controller.com_port_val.set(port_name)
+                self.controller.is_paired.set(True)
+                self.controller.is_reading = True
+                self.controller.serial = self.controller.port_manager.serial
+                self.controller.status_msg.set("Connected")
+                
+                # Send RTD setting
+                self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
+                
+                # Update status label in ConnectionSettings if available
+                def update_status():
+                    conn_window = getattr(self, "connection_window", None)
+                    if conn_window and hasattr(conn_window, "status_label"):
+                        conn_window.status_label.config(text=f"✓ Connected to {port_name}", fg="green")
+                    logger.info(f"Connected to {port_name}")
+                self.after(0, update_status)
+                
+                # Start read loop from main thread
+                self.after(0, self._read_data)
+                
+            else:
+                logger.error(f"Failed to connect: {msg}")
+                self.controller.status_msg.set("Connection failed")
+                def update_error():
+                    conn_window = getattr(self, "connection_window", None)
+                    if conn_window and hasattr(conn_window, "status_label"):
+                        conn_window.status_label.config(text=f"✗ Failed: {msg}", fg="red")
+                self.after(0, update_error)
+        except Exception as e:
+            logger.error(f"Error opening port: {e}", exc_info=True)
+            self.controller.status_msg.set("Connection error")
+            def update_exception():
+                conn_window = getattr(self, "connection_window", None)
+                if conn_window and hasattr(conn_window, "status_label"):
+                    conn_window.status_label.config(text=f"✗ Error: {str(e)}", fg="red")
+            self.after(0, update_exception)
 
     def _close_port(self):
         self.controller.port_manager.close_port()
@@ -1306,7 +1252,7 @@ class DashboardFrame(tk.Frame):
             logger.error(f"Read error: {e}")
         
         if self.controller.is_reading:
-            self.after(1, self._read_data)
+            self.after(20, self._read_data)
 
     def _process_data(self, packet):
         """Process sensor data and update UI"""
@@ -1317,6 +1263,20 @@ class DashboardFrame(tk.Frame):
                packet,
                enable_rtd_compensation=self.controller.apply_rtd_compensation.get()
            )
+           # print raw values to console
+           try:
+               print("\n[PACKET RECEIVED]", packet)
+               print("Parsed values:")
+               print("  Melt temp:", getattr(data, "temperature", None))
+               print("  RTD temp:", getattr(data, "rtd_temperature", None))
+               print("  RTD resistance:", getattr(data, "rtd_resistance", None))
+               print("  Thermocouple (C):", getattr(data, "thermocouple", None))
+               print("  Thermocouple µV:", getattr(data, "thermocouple_voltage_uv", None))
+               print("  Battery volts:", getattr(data, "battery_voltage", None))
+               print("  RSSI:", getattr(data, "rssi", None))
+               print("  Device ID:", getattr(data, "device_id", None))
+           except Exception as e:
+               logger.warning(f"Failed to print packet values: {e}")
         except Exception as e:
            logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {e}", exc_info=True)
            return   # Exit only if parsing completely fails
@@ -1332,26 +1292,59 @@ class DashboardFrame(tk.Frame):
            if conn and tx_id:
             tx_id = str(tx_id)
 
-            # Add to list if new
-            if tx_id not in conn.tx_ids:
-              conn.tx_ids.append(tx_id)
-              conn.tx_combo["values"] = conn.tx_ids
-              logger.info(f"Discovered new transmitter: {tx_id}")
+            # Check if connection window is still valid (not destroyed)
+            try:
+                conn.winfo_exists()
+            except tk.TclError:
+                conn = None
 
-            # Auto-select first TX
-            if len(conn.tx_ids) == 1:
-              conn.tx_combo.current(0)
-              conn.selected_tx = tx_id
-              self.controller.transmitter_id_val.set(tx_id)
-              logger.info(f"Auto-selected first transmitter: {tx_id}")
+            if conn and conn.winfo_exists():
+              # Add to list if new
+              if tx_id not in conn.tx_ids:
+                conn.tx_ids.append(tx_id)
+                try:
+                    conn.tx_combo["values"] = conn.tx_ids
+                except tk.TclError:
+                    logger.warning("tx_combo widget no longer exists")
+                logger.info(f"Discovered new transmitter: {tx_id}")
+
+              # Auto-select first TX
+              if len(conn.tx_ids) == 1:
+                try:
+                    conn.tx_combo.current(0)
+                    conn.selected_tx = tx_id
+                    self.controller.transmitter_id_val.set(tx_id)
+                    logger.info(f"Auto-selected first transmitter: {tx_id}")
+                except tk.TclError:
+                    logger.warning("Cannot update tx_combo - window may have closed")
+                    conn.selected_tx = tx_id
+                    self.controller.transmitter_id_val.set(tx_id)
+            else:
+              # Connection window closed, just store TX ID
+              if tx_id not in getattr(conn, "tx_ids", []):
+                if not hasattr(self, "_discovered_tx_ids"):
+                    self._discovered_tx_ids = []
+                if tx_id not in self._discovered_tx_ids:
+                    self._discovered_tx_ids.append(tx_id)
+                    logger.info(f"Discovered transmitter (offline): {tx_id}")
         except Exception as e:
            logger.error(f"Error in transmitter discovery: {e}", exc_info=True)
         
         # ===============================
-# FILTER: Only process data if transmitter ID is selected and matches
-# ===============================
+# TRANSMITTER SELECTION FILTERING
+    #        ===============================
         conn = getattr(self, "connection_window", None)
-        selected_tx = conn.selected_tx if conn else None
+        selected_tx = None
+        
+        # Check if connection window exists and is valid
+        if conn:
+            try:
+                if conn.winfo_exists():
+                    selected_tx = getattr(conn, "selected_tx", None)
+                else:
+                    conn = None
+            except tk.TclError:
+                conn = None
         
         # If a transmitter is selected, only process its data
         if selected_tx and str(tx_id) != str(selected_tx):
@@ -1359,8 +1352,7 @@ class DashboardFrame(tk.Frame):
             return
         
         # If no transmitter is selected yet, show the data anyway (useful during discovery)
-        if not selected_tx and conn:
-            logger.debug(f"No transmitter selected yet, processing packet from {tx_id}")
+        logger.info(f"Processing packet from TX: {tx_id} (selected: {selected_tx})")
         
         # -------- DEVICE TEMPERATURE --------
         device_temp = getattr(data, "temperature", None)
@@ -1375,6 +1367,43 @@ class DashboardFrame(tk.Frame):
         else:
           self.controller.rtd_temp.set("--")
 
+        # --- log to database and update history/graph ---
+        if device_temp is not None:
+            try:
+                new_val = float(device_temp)
+            except Exception:
+                new_val = None
+        else:
+            new_val = None
+
+        if new_val is not None:
+            self.controller.x_counter += 1
+            self.controller.temp_data.append(new_val)
+            self.controller.time_data.append(self.controller.x_counter)
+
+            # compute battery pct if voltage available
+            bat_pct = None
+            batt = getattr(data, "battery_voltage", None)
+            if batt is not None:
+                try:
+                    voltage = float(batt)
+                    bat_pct = int(round(100.0 * (voltage - 3.0) / (4.2 - 3.0)))
+                    bat_pct = max(0, min(100, bat_pct))
+                except Exception:
+                    bat_pct = None
+
+            rssi_val = getattr(data, "rssi", None)
+            self.controller.log_to_db(new_val, rtd_temp or 0, bat_pct or 0, rssi_val or 0, "OK")
+            ts = datetime.now().strftime("%H:%M:%S")
+            self.controller.history_display.appendleft(
+                f"{ts} | {new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
+            )
+            if "DashboardFrame" in self.controller.frames:
+                try:
+                    self.controller.frames["DashboardFrame"].update_graph()
+                except Exception:
+                    pass
+
     # -------- SAVE LAST VALUES (FOR COMPENSATION) --------
         self.last_thermocouple = getattr(data, "thermocouple", None)
         self.last_rtd = rtd_temp
@@ -1386,7 +1415,6 @@ class DashboardFrame(tk.Frame):
         # Check for alerts
         self._check_alerts(data)
 
-        # Update UI fields
         # -------------------------------
 # Thermocouple handling (FIXED)
 # -------------------------------
@@ -1397,11 +1425,13 @@ class DashboardFrame(tk.Frame):
         if tc_voltage_uv is not None and (tc_voltage_uv < 100 or tc_voltage_uv > 14000):
             self.tc_fifo.clear()
             self.controller.thermo_val.set("INVALID")
+            print(f"✗ Thermocouple INVALID (uV={tc_voltage_uv})")
 
 # Connected but no temperature yet
         elif tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
             self.tc_fifo.clear()
             self.controller.thermo_val.set("THERMO CONNECTED")
+            print(f"✓ Thermocouple CONNECTED (uV={tc_voltage_uv})")
 
 # Valid thermocouple temperature
         elif tc is not None:
@@ -1427,9 +1457,16 @@ class DashboardFrame(tk.Frame):
 
         if batt is not None:
             self.controller.battery_val.set(f"{batt:.2f}V")
+            # Also update diagnostic display
+            self.controller.bat_voltage.set(f"{batt:.2f}V")
         else:
-            # keep previous value or set to "--"
             self.controller.battery_val.set("--")
+            self.controller.bat_voltage.set("--")
+
+        # Update raw hex for diagnostics
+        raw_packet = getattr(data, "raw_packet", None)
+        if raw_packet:
+            self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet[:8]))
 
         # RSSI
         rssi = getattr(data, "rssi", None)
@@ -1439,7 +1476,6 @@ class DashboardFrame(tk.Frame):
             except Exception:
                 self.controller.rssi_val.set(str(rssi))
         else:
-            # if parser gives no rssi, keep existing value
             if self.controller.rssi_val.get() == "":
                 self.controller.rssi_val.set("--")
     
@@ -1791,7 +1827,6 @@ class SettingsFrame(tk.Frame):
 
         # ========== TAB 2: GRAPH ==========
         self.tab_frames["Graph"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Graph"].grid(row=0, column=0, sticky="nsew")
         graph_content = tk.Frame(self.tab_frames["Graph"], bg="#f0f0f0")
         graph_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -1799,14 +1834,17 @@ class SettingsFrame(tk.Frame):
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         tk.Label(graph_content, text="Configure time scales and axis modes for live graph display", 
                 font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
-        tk.Label(graph_content, text="• Time Scale: Adjust data buffer duration", 
-                font=("Arial", 10), bg="#f0f0f0", fg="#666666").pack(anchor="w")
-        tk.Label(graph_content, text="• Y-Axis Mode: Auto or Manual scaling", 
-                font=("Arial", 10), bg="#f0f0f0", fg="#666666").pack(anchor="w")
+        # interactive controls
+        self.create_combobox_row(graph_content, "Time Scale:", controller.time_scale_str, ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
+        tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(pady=(10,0))
+        tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
+        tk.Radiobutton(graph_content, text="Manual", variable=controller.y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack()
+        fr = tk.Frame(graph_content, bg="#f0f0f0"); fr.pack(pady=5)
+        tk.Entry(fr, textvariable=controller.y_min, width=6, font=("Arial", 12)).pack(side="left"); tk.Label(fr, text="-", bg="#f0f0f0").pack(side="left")
+        tk.Entry(fr, textvariable=controller.y_max, width=6, font=("Arial", 12)).pack(side="left")
         
         # ========== TAB 3: TRANSMITTER ==========
         self.tab_frames["Transmitter"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Transmitter"].grid(row=0, column=0, sticky="nsew")
         tx_content = tk.Frame(self.tab_frames["Transmitter"], bg="#f0f0f0")
         tx_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -1820,7 +1858,6 @@ class SettingsFrame(tk.Frame):
 
         # ========== TAB 4: OUTPUTS ==========
         self.tab_frames["Outputs"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Outputs"].grid(row=0, column=0, sticky="nsew")
         outputs_content = tk.Frame(self.tab_frames["Outputs"], bg="#f0f0f0")
         outputs_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -1865,7 +1902,6 @@ class SettingsFrame(tk.Frame):
         
         # ========== TAB 5: TROUBLESHOOTING ==========
         self.tab_frames["Troubleshooting"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Troubleshooting"].grid(row=0, column=0, sticky="nsew")
         debug_content = tk.Frame(self.tab_frames["Troubleshooting"], bg="#f0f0f0")
         debug_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -1880,7 +1916,6 @@ class SettingsFrame(tk.Frame):
         
         # ========== TAB 6: HISTORY ==========
         self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["History"].grid(row=0, column=0, sticky="nsew")
         hist_content = tk.Frame(self.tab_frames["History"], bg="#f0f0f0")
         hist_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -1895,7 +1930,6 @@ class SettingsFrame(tk.Frame):
 
         # ========== TAB: RTD COMPENSATION ==========
         self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["RTD Compensation"].grid(row=0, column=0, sticky="nsew")
 
         rtd_content = tk.Frame(self.tab_frames["RTD Compensation"], bg="#f0f0f0")
         rtd_content.pack(fill="both", expand=True, padx=30, pady=30)
@@ -1944,8 +1978,12 @@ class SettingsFrame(tk.Frame):
         for frame in self.tab_frames.values():
             frame.grid_remove()
         
-        # Show selected tab
-        self.tab_frames[tab_name].grid()
+        # Show selected tab with proper grid config
+        self.tab_frames[tab_name].grid(row=0, column=0, sticky="nsew")
+        
+        # if we just navigated to history, refresh the list
+        if tab_name == "History" and hasattr(self, "refresh_history"):
+            self.refresh_history()
         
         # Update button colors
         for btn_name, btn in self.tab_buttons.items():
@@ -1979,6 +2017,13 @@ class SettingsFrame(tk.Frame):
         tk.Label(f, text=label, width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
         tk.Label(f, textvariable=var, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc").pack(side="left", padx=15)
 
+    def refresh_history(self):
+        """Populate history listbox from controller buffer"""
+        if hasattr(self, "history_list"):
+            self.history_list.delete(0, tk.END)
+            for entry in self.controller.history_display:
+                self.history_list.insert(tk.END, entry)
+
     def export_csv(self):
         """Export measurements to CSV"""
         filename = filedialog.asksaveasfilename(
@@ -2004,6 +2049,11 @@ class SettingsFrame(tk.Frame):
           messagebox.showerror("Export Error", str(e))
 
     def save_and_exit(self):
+        # apply updated graph buffer size based on time scale
+        try:
+            self.controller.update_buffer_size()
+        except Exception:
+            pass
         self.controller.show_frame("DashboardFrame")
      
     
