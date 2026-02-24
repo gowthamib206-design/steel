@@ -1961,10 +1961,24 @@ class SettingsFrame(tk.Frame):
         tk.Label(tx_content, text="Transmitter Information", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         
-        device_id = controller.transmitter_id_val.get() or "NOT PAIRED"
-        self.create_static_row(tx_content, "Paired Device:", device_id)
-        """self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")"""
+        tx_frame = tk.Frame(tx_content, bg="#f0f0f0")
+        tx_frame.pack(fill="x", pady=8)
+        tk.Label(tx_frame, text="Paired Device:", width=20, anchor="e", bg="#f0f0f0", 
+        font=("Arial", 12, "bold")).pack(side="left")
+
+# ADD TRANSMITTER ID LABEL TO FRAME (NOT to tx_content)
+        self.tx_id_label = tk.Label(tx_frame, textvariable=controller.transmitter_id_val, 
+         fg="#0055aa", bg="#f0f0f0", font=("Arial", 12, "bold"))
+        self.tx_id_label.pack(side="left", padx=15)
+
+# Device Status row (separate)
         self.create_static_row(tx_content, "Device Status:", "Connected")
+       
+        
+        """device_id = controller.transmitter_id_val.get() or "NOT PAIRED"
+        self.create_static_row(tx_content, "Paired Device:", device_id)
+        self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")
+        self.create_static_row(tx_content, "Device Status:", "Connected")"""
 
         # ========== TAB 4: OUTPUTS ==========
         self.tab_frames["Outputs"] = tk.Frame(self.content_container, bg="#f0f0f0")
