@@ -872,8 +872,8 @@ class DashboardFrame(tk.Frame):
         self.line, = self.ax.plot([], [], 'r-', linewidth=3)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
-        self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.current_temp,
-                                          bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
+        self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.thermo_val,
+                          bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
 
         # Temperature display area (large)
         temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
@@ -1431,9 +1431,11 @@ class DashboardFrame(tk.Frame):
           self.controller.rtd_temp.set("--")
 
         # --- log to database and update history/graph ---
-        if device_temp is not None:
+        # Use melt temperature (thermocouple) for graph instead of device temperature
+        melt_temp = getattr(data, "thermocouple", None)
+        if melt_temp is not None:
             try:
-                new_val = float(device_temp)
+                new_val = float(melt_temp)
             except Exception:
                 new_val = None
         else:
@@ -1930,7 +1932,8 @@ class SettingsFrame(tk.Frame):
         self.create_entry_row(gen_content, "Station Name:", controller.station_name)
         self.create_static_row(gen_content, "Sensor Type:", "Type B")
         self.create_combobox_row(gen_content, "Dashboard View:", controller.view_mode, ["Digital View", "Graph View"])
-        self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
+        #w
+        # self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
 
         # ========== TAB 2: GRAPH ==========
         self.tab_frames["Graph"] = tk.Frame(self.content_container, bg="#f0f0f0")
@@ -1944,11 +1947,11 @@ class SettingsFrame(tk.Frame):
         # interactive controls
         self.create_combobox_row(graph_content, "Time Scale:", controller.time_scale_str, ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
         tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(pady=(10,0))
-        tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
+        """tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
         tk.Radiobutton(graph_content, text="Manual", variable=controller.y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack()
         fr = tk.Frame(graph_content, bg="#f0f0f0"); fr.pack(pady=5)
         tk.Entry(fr, textvariable=controller.y_min, width=6, font=("Arial", 12)).pack(side="left"); tk.Label(fr, text="-", bg="#f0f0f0").pack(side="left")
-        tk.Entry(fr, textvariable=controller.y_max, width=6, font=("Arial", 12)).pack(side="left")
+        tk.Entry(fr, textvariable=controller.y_max, width=6, font=("Arial", 12)).pack(side="left")"""
         
         # ========== TAB 3: TRANSMITTER ==========
         self.tab_frames["Transmitter"] = tk.Frame(self.content_container, bg="#f0f0f0")
@@ -1960,7 +1963,7 @@ class SettingsFrame(tk.Frame):
         
         device_id = controller.transmitter_id_val.get() or "NOT PAIRED"
         self.create_static_row(tx_content, "Paired Device:", device_id)
-        self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")
+        """self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")"""
         self.create_static_row(tx_content, "Device Status:", "Connected")
 
         # ========== TAB 4: OUTPUTS ==========
@@ -1981,11 +1984,11 @@ class SettingsFrame(tk.Frame):
         self.out_notebook = ttk.Notebook(outputs_content)
         self.out_notebook.pack(fill="both", expand=True, padx=0, pady=10)
         
-        tab_rtu = tk.Frame(self.out_notebook, bg="#f0f0f0")
+        """tab_rtu = tk.Frame(self.out_notebook, bg="#f0f0f0")
         self.out_notebook.add(tab_rtu, text="Modbus RTU")
         rtu_content = tk.Frame(tab_rtu, bg="#f0f0f0")
         rtu_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(rtu_content, "Slave ID:", controller.mb_slave_id)
+        self.create_entry_row(rtu_content, "Slave ID:", controller.mb_slave_id)"""
         
         tab_tcp = tk.Frame(self.out_notebook, bg="#f0f0f0")
         self.out_notebook.add(tab_tcp, text="Modbus TCP")
@@ -1994,7 +1997,7 @@ class SettingsFrame(tk.Frame):
         self.create_entry_row(tcp_content, "IP Address:", controller.eth_ip)
         self.create_entry_row(tcp_content, "Port:", controller.eth_port)
         
-        tab_420 = tk.Frame(self.out_notebook, bg="#f0f0f0")
+        """tab_420 = tk.Frame(self.out_notebook, bg="#f0f0f0")
         self.out_notebook.add(tab_420, text="4-20mA")
         analog_content = tk.Frame(tab_420, bg="#f0f0f0")
         analog_content.pack(fill="both", expand=True, padx=20, pady=20)
@@ -2005,7 +2008,7 @@ class SettingsFrame(tk.Frame):
         self.out_notebook.add(tab_prof, text="Profibus/Net")
         prof_content = tk.Frame(tab_prof, bg="#f0f0f0")
         prof_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(prof_content, "Station Address:", controller.prof_station)
+        self.create_entry_row(prof_content, "Station Address:", controller.prof_station)"""
         
         # ========== TAB 5: TROUBLESHOOTING ==========
         self.tab_frames["Troubleshooting"] = tk.Frame(self.content_container, bg="#f0f0f0")
