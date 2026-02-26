@@ -1461,7 +1461,7 @@ class DashboardFrame(tk.Frame):
             self.controller.log_to_db(new_val, rtd_temp or 0, bat_pct or 0, rssi_val or 0, "OK")
             ts = datetime.now().strftime("%H:%M:%S")
             self.controller.history_display.appendleft(
-                f"{ts} | {new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
+                f"{ts} | Melt:{new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
             )
             if "DashboardFrame" in self.controller.frames:
                 try:
@@ -1475,7 +1475,6 @@ class DashboardFrame(tk.Frame):
 
         if not self.rtd_ready and self.last_thermocouple is not None and self.last_rtd is not None:
           self.rtd_ready = True
-
 
         # Check for alerts
         self._check_alerts(data)
@@ -1691,7 +1690,6 @@ class DashboardFrame(tk.Frame):
                 "Error",
                 f"Unable to open connection settings:\n{e}"
             )
-
 
 class ConnectionSettings(tk.Toplevel):
     """COM Port Configuration Popup — opens immediately, requests password, enables controls on success."""
