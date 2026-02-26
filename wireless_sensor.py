@@ -1785,9 +1785,17 @@ class ConnectionSettings(tk.Toplevel):
         # populate combo (disabled until password)
         self.update_ports()
 
+        self.protocol("WM_DELETE_WINDOW", self.on_window_close)
+
         # Ensure popup is shown before the password dialog
         self.lift()
+        self.focus_force()
         self.after(100, self.ask_password)  # call after short delay so the Toplevel is visible
+
+    def on_window_close(self):
+        """Handle X button click - just close the window, don't destroy permanently"""
+        logger.info("Connection Settings window closed")
+        self.destroy()
 
     def update_ports(self):
         ports = self.controller.port_manager.get_available_ports()
@@ -1823,6 +1831,29 @@ class ConnectionSettings(tk.Toplevel):
         self.status_label.config(text="Unlocked — you may connect", fg="green")
         # refresh port list now that controls are enabled
         self.update_ports()
+        self.restore_button_states()
+
+    def restore_button_states(self):
+        """Restore button states from saved connection status"""
+        # Read the saved state from controller
+        connection_status = getattr(self.controller, 'connection_status', 'disconnected')
+        
+        logger.info(f"[WINDOW REOPENED] Connection status from controller: {connection_status}")
+        
+        if connection_status == "connected":
+            # Was CONNECTED before - disable CONNECT, enable DISCONNECT
+            self.btn_connect.config(state="disabled")
+            self.btn_disconnect.config(state="normal")
+            self.status_label.config(text="✓ Connected — ready to disconnect", fg="green")
+            logger.info("✓ Restored: CONNECT disabled, DISCONNECT enabled")
+            
+        else:  # "disconnected" or any other state
+            # Was DISCONNECTED - enable CONNECT, disable DISCONNECT
+            self.btn_connect.config(state="normal")
+            self.btn_disconnect.config(state="disabled")
+            self.status_label.config(text="Ready to connect", fg="black")
+            logger.info("✓ Restored: CONNECT enabled, DISCONNECT disabled")
+
 
     def connect(self):
         port = self.combo.get()
@@ -1837,6 +1868,14 @@ class ConnectionSettings(tk.Toplevel):
         self.dashboard._open_port()
         self._is_connected = True
         self.dashboard.is_connected = True
+
+         # ✅ SAVE CONNECTION STATE to controller
+        self.controller.connection_status = "connected"
+        self.dashboard.is_connected = True
+        
+        self.status_label.config(text=f"✓ Connected to {port}", fg="green")
+        logger.info(f"[CONNECT] Button state SAVED: connected")
+
 
     def on_tx_selected(self, event):
         """Handle transmitter ID selection change"""
@@ -1859,11 +1898,13 @@ class ConnectionSettings(tk.Toplevel):
         self.dashboard._close_port()
 
         # Enable connect, disable disconnect
-        self._is_connected = False
+        self.controller.connection_status = "disconnected"
         self.dashboard.is_connected = False
             # After disconnect, update button states
         self.btn_connect.config(state="normal")
         self.btn_disconnect.config(state="disabled")
+        self.status_label.config(text="Disconnected — ready to connect", fg="black")
+        
 
         # Clear TX dropdown
         self.tx_ids.clear()
