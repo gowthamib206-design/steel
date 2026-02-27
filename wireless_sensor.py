@@ -1025,6 +1025,22 @@ class DashboardFrame(tk.Frame):
         """Handle RTD compensation checkbox toggle"""
         enabled = self.controller.apply_rtd_compensation.get()
         logger.info(f"RTD Compensation checkbox toggled: {enabled}")
+
+         # Send hardware command in background thread to avoid UI lag
+        def send_command():
+            try:
+                if (hasattr(self.controller, 'port_manager') and 
+                    self.controller.port_manager.serial and 
+                    self.controller.port_manager.serial.is_open):
+                    cmd = b'RTD_ON\n' if enabled else b'RTD_OFF\n'
+                    self.controller.port_manager.serial.write(cmd)
+                    logger.info(f"RTD command sent to hardware: {cmd.decode().strip()}")
+            except Exception as e:
+                logger.error(f"Error sending RTD command: {e}")
+
+        # Run in background thread (no lag on UI)
+        thread = threading.Thread(target=send_command, daemon=True)
+        thread.start()
         
         # Clear thermocouple FIFO buffer to avoid stale data
         self.tc_fifo.clear()
@@ -1468,35 +1484,8 @@ class DashboardFrame(tk.Frame):
                     self.controller.frames["DashboardFrame"].update_graph()
                 except Exception:
                     pass
-
-    # -------- SAVE LAST VALUES (FOR COMPENSATION) --------
-        self.last_thermocouple = getattr(data, "thermocouple", None)
-        self.last_rtd = rtd_temp
-
-        if not self.rtd_ready and self.last_thermocouple is not None and self.last_rtd is not None:
-          self.rtd_ready = True
-
-        # Check for alerts
-        self._check_alerts(data)
-
         # -------------------------------
-# Thermocouple handling (FIXED)
-# -------------------------------
-        tc = getattr(data, "thermocouple", None)
-        tc_voltage_uv = getattr(data, "thermocouple_voltage_uv", None)
-
-         # Out of range → invalid
-        if tc_voltage_uv is not None and (tc_voltage_uv < 100 or tc_voltage_uv > 14000):
-            self.tc_fifo.clear()
-            self.controller.thermo_val.set("INVALID")
-            print(f"✗ Thermocouple INVALID (uV={tc_voltage_uv})")
-
-# Connected but no temperature yet
-        elif tc_voltage_uv is not None and 100 <= tc_voltage_uv <= 1800:
-            self.tc_fifo.clear()
-            self.controller.thermo_val.set("THERMO CONNECTED")
-            print(f"✓ Thermocouple CONNECTED (uV={tc_voltage_uv})")
-
+# 
 # Valid thermocouple temperature
         elif tc is not None:
             self.tc_fifo.append(tc)
@@ -2123,18 +2112,25 @@ class SettingsFrame(tk.Frame):
         tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
                   padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)
     def on_rtd_compensation_changed(self):
-            enabled = self.controller.apply_rtd_compensation.get()
-            print("RTD Compensation:", enabled)
+        """Handle RTD compensation checkbox toggle - send command in background thread (no lag)"""
+        enabled = self.controller.apply_rtd_compensation.get()
+        logger.info(f"RTD Compensation checkbox toggled: {enabled}")
 
+        # Send hardware command in background thread to avoid UI lag
+        def send_command():
             try:
-               if hasattr(self.controller, "serial") and self.controller.serial:
-                    if enabled:
-                      self.controller.serial.write(b'RTD_ON\n')
-                    else:
-                       self.controller.serial.write(b'RTD_OFF\n')
+                if (hasattr(self.controller, 'port_manager') and 
+                    self.controller.port_manager.serial and 
+                    self.controller.port_manager.serial.is_open):
+                    cmd = b'RTD_ON\n' if enabled else b'RTD_OFF\n'
+                    self.controller.port_manager.serial.write(cmd)
+                    logger.info(f"RTD command sent to hardware: {cmd.decode().strip()}")
             except Exception as e:
-             print("RTD Error:", e)
-    
+                logger.error(f"Error sending RTD command: {e}")
+
+        # Run in background thread (no lag on UI)
+        thread = threading.Thread(target=send_command, daemon=True)
+        thread.start()
     def show_tab(self, tab_name):
         """Show selected tab and update button colors"""
         # Hide all tabs
