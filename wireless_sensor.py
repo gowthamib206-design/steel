@@ -1975,6 +1975,24 @@ class SettingsFrame(tk.Frame):
         # interactive controls
         self.create_combobox_row(graph_content, "Time Scale:", controller.time_scale_str, ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
         tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(pady=(10,0))
+
+        # Temperature Range (Min - Max)
+        temp_range_frame = tk.Frame(graph_content, bg="#f0f0f0")
+        temp_range_frame.pack(fill="x", pady=10)
+        tk.Label(temp_range_frame, text="Temperature Range:", width=20, anchor="e", bg="#f0f0f0", 
+         font=("Arial", 12, "bold")).pack(side="left")
+
+        range_input_frame = tk.Frame(temp_range_frame, bg="#f0f0f0")
+        range_input_frame.pack(side="left", padx=15)
+
+        tk.Label(range_input_frame, text="Min (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        min_entry = tk.Entry(range_input_frame, textvariable=controller.y_min, width=10, font=("Arial", 11))
+        min_entry.pack(side="left", padx=5)
+ 
+        tk.Label(range_input_frame, text="Max (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        max_entry = tk.Entry(range_input_frame, textvariable=controller.y_max, width=10, font=("Arial", 11))
+        max_entry.pack(side="left", padx=5)
+
         """tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
         tk.Radiobutton(graph_content, text="Manual", variable=controller.y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack()
         fr = tk.Frame(graph_content, bg="#f0f0f0"); fr.pack(pady=5)
@@ -2006,6 +2024,7 @@ class SettingsFrame(tk.Frame):
         """device_id = controller.transmitter_id_val.get() or "NOT PAIRED"
         self.create_static_row(tx_content, "Paired Device:", device_id)
         self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")
+
         self.create_static_row(tx_content, "Device Status:", "Connected")"""
 
         # ========== TAB 4: OUTPUTS ==========
@@ -2020,7 +2039,17 @@ class SettingsFrame(tk.Frame):
         com_frame = tk.LabelFrame(outputs_content, text="COM Port Settings", bg="#f0f0f0", 
                                  font=("Arial", 12, "bold"), padx=15, pady=15)
         com_frame.pack(fill="x", pady=10)
-        self.create_combobox_row(com_frame, "Port:", controller.com_port, ["COM1", "COM2", "COM3", "USB-SERIAL"])
+        """self.create_combobox_row(com_frame, "Port:", controller.com_port, ["COM1", "COM2", "COM3", "USB-SERIAL"])"""
+        
+        # Port dropdown with REFRESH button
+        port_frame = tk.Frame(com_frame, bg="#f0f0f0")
+        port_frame.pack(fill="x", pady=8)
+        tk.Label(port_frame, text="Port:", width=20, anchor="e", bg="#f0f0f0", 
+         font=("Arial", 12, "bold")).pack(side="left")
+
+        self.port_combo = ttk.Combobox(port_frame, state="readonly", font=("Arial", 11), width=25)
+        self.port_combo.pack(side="left", padx=15)
+
         self.create_combobox_row(com_frame, "Baud Rate:", controller.baud_rate, ["9600", "19200", "38400", "115200"])
         
         self.out_notebook = ttk.Notebook(outputs_content)
