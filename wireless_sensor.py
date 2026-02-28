@@ -24,6 +24,7 @@ import csv
 import sqlite3
 from collections import deque
 import threading
+import calendar
 
 # plotting support (similar to acucast demo)
 import matplotlib
@@ -621,6 +622,84 @@ class SensorDataParser:
             raise ValueError(f"Unexpected parsing error: {e}")
 
 
+class CalendarPopup(tk.Toplevel):
+    """A minimal calendar popup to choose a date (YYYY-MM-DD).
+
+    Usage: CalendarPopup(parent, callback)
+    callback will be called with the selected date string.
+    """
+    def __init__(self, parent, select_callback, year=None, month=None):
+        super().__init__(parent)
+        self.withdraw()
+        self.transient(parent)
+        self.title('Select Date')
+        self.select_callback = select_callback
+        self.resizable(False, False)
+
+        now = datetime.now()
+        self.year = year or now.year
+        self.month = month or now.month
+
+        self.body = tk.Frame(self)
+        self.body.pack(padx=8, pady=8)
+
+        nav = tk.Frame(self.body)
+        nav.pack(fill='x')
+        tk.Button(nav, text='<', width=3, command=self._prev_month).pack(side='left')
+        self.title_lbl = tk.Label(nav, text='', width=20)
+        self.title_lbl.pack(side='left', padx=6)
+        tk.Button(nav, text='>', width=3, command=self._next_month).pack(side='right')
+
+        self.cal_frame = tk.Frame(self.body)
+        self.cal_frame.pack()
+
+        self._build_calendar()
+        self.update_idletasks()
+        self.deiconify()
+
+    def _build_calendar(self):
+        for w in self.cal_frame.winfo_children():
+            w.destroy()
+
+        self.title_lbl.config(text=f"{calendar.month_name[self.month]} {self.year}")
+        wkday_names = ['Mo','Tu','We','Th','Fr','Sa','Su']
+        header = tk.Frame(self.cal_frame)
+        header.grid(row=0, column=0)
+        for c, name in enumerate(wkday_names):
+            tk.Label(self.cal_frame, text=name, width=3).grid(row=0, column=c)
+
+        month_mat = calendar.monthcalendar(self.year, self.month)
+        for r, week in enumerate(month_mat, start=1):
+            for c, day in enumerate(week):
+                if day == 0:
+                    tk.Label(self.cal_frame, text='', width=3).grid(row=r, column=c)
+                else:
+                    b = tk.Button(self.cal_frame, text=str(day), width=3,
+                                  command=lambda d=day: self._select_day(d))
+                    b.grid(row=r, column=c, padx=1, pady=1)
+
+    def _select_day(self, day: int):
+        dt = datetime(self.year, self.month, day)
+        self.select_callback(dt.strftime('%Y-%m-%d'))
+        self.destroy()
+
+    def _prev_month(self):
+        if self.month == 1:
+            self.month = 12
+            self.year -= 1
+        else:
+            self.month -= 1
+        self._build_calendar()
+
+    def _next_month(self):
+        if self.month == 12:
+            self.month = 1
+            self.year += 1
+        else:
+            self.month += 1
+        self._build_calendar()
+
+
 class SensorGUI(tk.Tk):
     """GUI for wireless sensor data logger with professional ACUCAST-style interface"""
     
@@ -636,21 +715,29 @@ class SensorGUI(tk.Tk):
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
 
-        # Load logo image
-        if getattr(sys, 'frozen', False):
-            # Running in a bundle
-            logo_path = os.path.join(sys._MEIPASS, 'arrdy-logo.png')
-        else:
-            logo_path = 'arrdy-logo.png'
-        
-        # Load with PIL for resizing
-        pil_image = Image.open(logo_path)
-        self.logo_img = ImageTk.PhotoImage(pil_image)  # For icon
-        self.iconphoto(False, self.logo_img)
-        
-        # Resize for display (50x50)
-        pil_image_resized = pil_image.resize((50, 50), Image.Resampling.LANCZOS)
-        self.logo_img_small = ImageTk.PhotoImage(pil_image_resized)
+        # Load logo image (optional)
+        logo_path = None
+        try:
+            if getattr(sys, 'frozen', False):
+                # Running in a bundle
+                logo_path = os.path.join(sys._MEIPASS, 'arrdy-logo.png')
+            else:
+                logo_path = 'arrdy-logo.png'
+            pil_image = Image.open(logo_path)
+            self.logo_img = ImageTk.PhotoImage(pil_image)  # For icon
+            try:
+                self.iconphoto(False, self.logo_img)
+            except Exception:
+                # e.g. running in headless test environment
+                pass
+
+            # Resize for display (50x50)
+            pil_image_resized = pil_image.resize((50, 50), Image.Resampling.LANCZOS)
+            self.logo_img_small = ImageTk.PhotoImage(pil_image_resized)
+        except Exception:
+            # icon or file may not exist in unit test environment
+            self.logo_img = None
+            self.logo_img_small = None
 
         # Allow exiting fullscreen with Escape (handy for testing)
         self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
@@ -736,29 +823,64 @@ class SensorGUI(tk.Tk):
         self.show_frame("DashboardFrame")
     
     # --- database & history helpers copied from ACUCAST demo ---
-    def init_db(self):
-        """Initialize SQLite database and create table if needed"""
-        self.conn = sqlite3.connect("temperature_logs.db", check_same_thread=False)
+    def init_db(self, db_path: str = "temperature_logs.db"):
+        """Initialize SQLite database and create table if needed.
+
+        Args:
+            db_path: Path to the database file. Defaults to "temperature_logs.db".
+                     Allows tests to pass ":memory:" or other locations.
+        """
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
+        
+        # Check if the old schema exists (no device_id column)
+        try:
+            self.cursor.execute("PRAGMA table_info(measurements)")
+            cols = [row[1] for row in self.cursor.fetchall()]
+            if cols and 'device_id' not in cols:
+                # Old schema detected, migrate by renaming old table and creating new one
+                logger.info("Old measurements table schema detected. Migrating to new schema...")
+                self.cursor.execute("ALTER TABLE measurements RENAME TO measurements_old")
+                self.conn.commit()
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet, that's fine
+            pass
+
+        # Create new schema table (will work whether table existed or not after migration)
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS measurements (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT,
-                temperature REAL,
-                cjc_temp REAL,
-                battery INTEGER,
-                rssi INTEGER,
-                status TEXT
+                device_id TEXT,
+                temp_raw INTEGER,
+                rtd_raw INTEGER,
+                thermo_raw INTEGER,
+                batt_raw INTEGER
             )
         """)
         self.conn.commit()
 
-    def log_to_db(self, temp, cjc, bat, rssi, status):
-        """Insert new record into DB (non-blocking)"""
+    def log_to_db(self,
+                  device_id: str,
+                  temp_raw: int,
+                  rtd_raw: int,
+                  thermo_raw: int,
+                  batt_raw: int):
+        """Insert raw measurement values into the database.
+
+        Args:
+            device_id: human-readable 4-byte ID string
+            temp_raw: 32-bit integer representing temperature*10000
+            rtd_raw: 16-bit raw ADC reading for RTD
+            thermo_raw: 16-bit raw ADC reading for thermocouple
+            batt_raw: 16-bit raw ADC reading for battery voltage
+        """
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
-            self.cursor.execute("INSERT INTO measurements (timestamp, temperature, cjc_temp, battery, rssi, status) VALUES (?, ?, ?, ?, ?, ?)",
-                                (ts, temp, cjc, bat, rssi, status))
+            self.cursor.execute(
+                "INSERT INTO measurements (timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw) VALUES (?, ?, ?, ?, ?, ?)",
+                (ts, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw)
+            )
             # commit every 10 records instead of every single one
             if not hasattr(self, '_commit_counter'):
                 self._commit_counter = 0
@@ -813,8 +935,15 @@ class DashboardFrame(tk.Frame):
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         header.grid_propagate(False)
         
-        # Logo
-        logo_label = tk.Label(header, image=controller.logo_img_small, bg="#e6e6e6")
+        # Logo (only show if image loaded successfully)
+        if controller.logo_img_small:
+            try:
+                logo_label = tk.Label(header, image=controller.logo_img_small, bg="#e6e6e6")
+            except Exception:
+                # invalid image object (common in headless/unit tests)
+                logo_label = tk.Label(header, text="LOGO", bg="#e6e6e6")
+        else:
+            logo_label = tk.Label(header, text="LOGO", bg="#e6e6e6")
         logo_label.pack(side="left", padx=10, pady=10)
         
         # Title and device info (left side)
@@ -1473,9 +1602,29 @@ class DashboardFrame(tk.Frame):
                 except Exception:
                     bat_pct = None
 
-            rssi_val = getattr(data, "rssi", None)
-            self.controller.log_to_db(new_val, rtd_temp or 0, bat_pct or 0, rssi_val or 0, "OK")
+            # pull raw values directly from the packet so we can log them
+            pkt = data.raw_packet or packet
+            # device id string is already available in data.device_id
+            dev_id = getattr(data, "device_id", "")
+
+            # reconstruct raw integers exactly as parser does
+            temp_int = pkt[3]
+            temp_int = (temp_int << 8) | pkt[2]
+            temp_int = (temp_int << 8) | pkt[1]
+            temp_int = (temp_int << 8) | pkt[0]
+
+            rtd_int = pkt[11]
+            rtd_int = (rtd_int << 8) | pkt[10]
+
+            thermo_int = pkt[13]
+            thermo_int = (thermo_int << 8) | pkt[12]
+
+            batt_int = (pkt[15] << 8) | pkt[14]
+
+            self.controller.log_to_db(dev_id, temp_int, rtd_int, thermo_int, batt_int)
+
             ts = datetime.now().strftime("%H:%M:%S")
+            # history display still uses simplified string
             self.controller.history_display.appendleft(
                 f"{ts} | Melt:{new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
             )
@@ -2074,9 +2223,28 @@ class SettingsFrame(tk.Frame):
         tk.Label(hist_content, text="Measurement History", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         
-        tk.Button(hist_content, text="📥 EXPORT TO CSV", bg="#0066cc", fg="white", font=("Arial", 12, "bold"),
-                  command=self.export_csv).pack(pady=10)
-        
+        # Date range inputs for export
+        self.date_from_var = tk.StringVar(value="")
+        self.date_to_var = tk.StringVar(value="")
+
+        range_frame = tk.Frame(hist_content, bg="#f0f0f0")
+        range_frame.pack(fill="x", pady=(0, 10))
+
+        tk.Label(range_frame, text="From:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
+        from_box = tk.Frame(range_frame, bg="#f0f0f0")
+        from_box.pack(side="left", padx=(5, 15))
+        tk.Entry(from_box, textvariable=self.date_from_var, width=18, font=("Arial", 10)).pack(side="left")
+        tk.Button(from_box, text="📅", width=3, command=lambda: CalendarPopup(self, lambda d: self.date_from_var.set(d))).pack(side="left", padx=(6,0))
+
+        tk.Label(range_frame, text="To:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
+        to_box = tk.Frame(range_frame, bg="#f0f0f0")
+        to_box.pack(side="left", padx=(5, 15))
+        tk.Entry(to_box, textvariable=self.date_to_var, width=18, font=("Arial", 10)).pack(side="left")
+        tk.Button(to_box, text="📅", width=3, command=lambda: CalendarPopup(self, lambda d: self.date_to_var.set(d))).pack(side="left", padx=(6,0))
+
+        tk.Button(range_frame, text="📥 Export Range to CSV", bg="#0066cc", fg="white",
+              font=("Arial", 11, "bold"), command=self.export_csv).pack(side="right")
+
         self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
         self.history_list.pack(fill="both", expand=True, pady=10)
 
@@ -2177,35 +2345,145 @@ class SettingsFrame(tk.Frame):
         tk.Label(f, textvariable=var, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc").pack(side="left", padx=15)
 
     def refresh_history(self):
-        """Populate history listbox from controller buffer"""
-        if hasattr(self, "history_list"):
-            self.history_list.delete(0, tk.END)
-            for entry in self.controller.history_display:
+        """Populate history listbox from the database instead of the in-memory buffer.
+
+        Displays the most recent 30 measurements using the same format as when
+        data is received.  Conversions are performed using the raw integer
+        fields so that no RTD compensation is accidentally applied.
+        """
+        if not hasattr(self, "history_list"):
+            return
+        self.history_list.delete(0, tk.END)
+        try:
+            self.controller.cursor.execute(
+                "SELECT timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw "
+                "FROM measurements ORDER BY id DESC LIMIT 30"
+            )
+            rows = self.controller.cursor.fetchall()
+            for ts, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw in rows:
+                # format time only for display
+                try:
+                    ts_h = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").strftime("%H:%M:%S")
+                except Exception:
+                    ts_h = ts
+
+                # convert raw thermocouple to temperature without RTD compensation
+                melt_temp = voltage_uV_to_temperature_C(raw_to_voltage_uV(thermo_raw))
+
+                # convert RTD raw to temperature
+                rtd_res = (rtd_raw * 400) / (2 ** 15)
+                try:
+                    rtd_temp_val = RTDTemperatureTable.get_temperature_from_resistance(rtd_res)
+                except Exception:
+                    rtd_temp_val = "--"
+
+                # battery percent calculation (same as dashboard)
+                bat_volt = batt_raw / 1000.0
+                bat_pct = int(round(100.0 * (bat_volt - 3.0) / (4.2 - 3.0)))
+                bat_pct = max(0, min(100, bat_pct))
+
+                entry = (
+                    f"{ts_h} | Melt:{melt_temp}{self.controller.units.get()} | "
+                    f"RTD:{rtd_temp_val} | Bat:{bat_pct}%"
+                )
                 self.history_list.insert(tk.END, entry)
+        except Exception:
+            # silently ignore if DB not ready
+            pass
 
     def export_csv(self):
-        """Export measurements to CSV"""
+        """Export measurements to CSV with converted values.
+
+        The output columns follow the specification:
+            Date, Transmitter ID, Melt °C, RTD °C, Device °C, Battery V
+        Conversions are applied using the same formulas as in the display code
+        but *without* RTD compensation for the melt temperature.  The timestamp
+        is reformatted to use a hyphen between date and time.
+        """
         filename = filedialog.asksaveasfilename(
            defaultextension=".csv",
            filetypes=[("CSV Files", "*.csv")]
         )
 
         if not filename:
-          return
+            return
 
         try:
-            self.controller.cursor.execute("SELECT * FROM measurements")
+            # Build SQL with optional date range
+            s_from = getattr(self, 'date_from_var', tk.StringVar()).get().strip()
+            s_to = getattr(self, 'date_to_var', tk.StringVar()).get().strip()
+
+            def parse_input_date(s: str, is_start: bool) -> str:
+                # Accepts formats: YYYY-MM-DD-HH:MM:SS, YYYY-MM-DD HH:MM:SS, YYYY-MM-DD
+                if not s:
+                    return None
+                fmts = ["%Y-%m-%d-%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]
+                for fmt in fmts:
+                    try:
+                        dt = datetime.strptime(s, fmt)
+                        if fmt == "%Y-%m-%d":
+                            if is_start:
+                                dt = dt.replace(hour=0, minute=0, second=0)
+                            else:
+                                dt = dt.replace(hour=23, minute=59, second=59)
+                        # DB timestamps use 'YYYY-MM-DD HH:MM:SS'
+                        return dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        continue
+                raise ValueError(f"Invalid date format: {s}")
+
+            params = []
+            where_clauses = []
+            if s_from:
+                from_ts = parse_input_date(s_from, True)
+                where_clauses.append("timestamp >= ?")
+                params.append(from_ts)
+            if s_to:
+                to_ts = parse_input_date(s_to, False)
+                where_clauses.append("timestamp <= ?")
+                params.append(to_ts)
+
+            base_sql = "SELECT timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw FROM measurements"
+            if where_clauses:
+                sql = base_sql + " WHERE " + " AND ".join(where_clauses) + " ORDER BY id ASC"
+                self.controller.cursor.execute(sql, params)
+            else:
+                self.controller.cursor.execute(base_sql + " ORDER BY id ASC")
             rows = self.controller.cursor.fetchall()
 
             with open(filename, 'w', newline='', encoding='utf-8') as f:
-              writer = csv.writer(f)
-              writer.writerow(["ID", "Timestamp", "Temp", "CJC", "Battery", "RSSI", "Status"])
-              writer.writerows(rows)
+                writer = csv.writer(f)
+                writer.writerow([
+                    "Date", "Transmitter ID", "MeltTemp_C", "RTDTemp_C",
+                    "DeviceTemp_C", "BatteryVolts"
+                ])
+                for ts, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw in rows:
+                    # date formatting
+                    try:
+                        dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+                        date_str = dt.strftime("%Y-%m-%d-%H:%M:%S")
+                    except Exception:
+                        date_str = ts
+
+                    # compute temperatures/voltages
+                    melt_temp = voltage_uV_to_temperature_C(raw_to_voltage_uV(thermo_raw))
+                    rtd_res = (rtd_raw * 400) / (2 ** 15)
+                    try:
+                        rtd_temp_val = RTDTemperatureTable.get_temperature_from_resistance(rtd_res)
+                    except Exception:
+                        rtd_temp_val = ""
+                    device_temp = temp_raw / 10000.0
+                    batt_volt = batt_raw / 1000.0
+
+                    writer.writerow([
+                        date_str, dev_id, melt_temp, rtd_temp_val,
+                        device_temp, batt_volt
+                    ])
 
             messagebox.showinfo("Export Success", f"Data exported to {filename}")
 
         except Exception as e:
-          messagebox.showerror("Export Error", str(e))
+            messagebox.showerror("Export Error", str(e))
 
     def save_and_exit(self):
         # apply updated graph buffer size based on time scale
