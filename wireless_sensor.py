@@ -2123,7 +2123,7 @@ class SettingsFrame(tk.Frame):
                 font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
         # interactive controls
         self.create_combobox_row(graph_content, "Time Scale:", controller.time_scale_str, ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
-        tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(pady=(10,0))
+        tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="nw",pady=(10,0))
 
         # Temperature Range (Min - Max)
         temp_range_frame = tk.Frame(graph_content, bg="#f0f0f0")
