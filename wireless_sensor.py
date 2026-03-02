@@ -700,6 +700,141 @@ class CalendarPopup(tk.Toplevel):
         self._build_calendar()
 
 
+class DateTimePopup(tk.Toplevel):
+    """A calendar and time picker popup to choose a datetime (YYYY-MM-DD HH:MM:SS).
+
+    Usage: DateTimePopup(parent, callback)
+    callback will be called with the selected datetime string.
+    """
+    def __init__(self, parent, select_callback, year=None, month=None):
+        super().__init__(parent)
+        self.withdraw()
+        self.transient(parent)
+        self.title('Select Date and Time')
+        self.select_callback = select_callback
+        self.resizable(False, False)
+
+        now = datetime.now()
+        self.year = year or now.year
+        self.month = month or now.month
+        self.day = None
+        self.hour = now.hour
+        self.minute = now.minute
+        self.second = now.second
+
+        # Create StringVar variables for time inputs
+        self.hour_var = tk.StringVar(value=str(self.hour).zfill(2))
+        self.minute_var = tk.StringVar(value=str(self.minute).zfill(2))
+        self.second_var = tk.StringVar(value=str(self.second).zfill(2))
+
+        self.body = tk.Frame(self)
+        self.body.pack(padx=8, pady=8)
+
+        # Calendar section
+        nav = tk.Frame(self.body)
+        nav.pack(fill='x', pady=(0, 10))
+        tk.Button(nav, text='<', width=3, command=self._prev_month).pack(side='left')
+        self.title_lbl = tk.Label(nav, text='', width=20)
+        self.title_lbl.pack(side='left', padx=6)
+        tk.Button(nav, text='>', width=3, command=self._next_month).pack(side='right')
+
+        self.cal_frame = tk.Frame(self.body)
+        self.cal_frame.pack(pady=(0, 10))
+
+        # Time section
+        time_frame = tk.Frame(self.body)
+        time_frame.pack(fill='x', pady=10)
+        
+        tk.Label(time_frame, text='Time:', font=('Arial', 10, 'bold')).pack(anchor='w')
+        
+        time_input_frame = tk.Frame(time_frame)
+        time_input_frame.pack(fill='x', pady=(5, 0))
+        
+        tk.Label(time_input_frame, text='HH:').pack(side='left', padx=(5, 0))
+        self.hour_spinbox = tk.Spinbox(time_input_frame, from_=0, to=23, width=3, textvariable=self.hour_var)
+        self.hour_spinbox.pack(side='left', padx=(2, 10))
+        
+        tk.Label(time_input_frame, text='MM:').pack(side='left')
+        self.minute_spinbox = tk.Spinbox(time_input_frame, from_=0, to=59, width=3, textvariable=self.minute_var)
+        self.minute_spinbox.pack(side='left', padx=(2, 10))
+        
+        tk.Label(time_input_frame, text='SS').pack(side='left')
+        self.second_spinbox = tk.Spinbox(time_input_frame, from_=0, to=59, width=3, textvariable=self.second_var)
+        self.second_spinbox.pack(side='left', padx=(2, 0))
+        
+        # Buttons
+        button_frame = tk.Frame(self.body)
+        button_frame.pack(fill='x', pady=(10, 0))
+        tk.Button(button_frame, text='OK', width=10, command=self._confirm).pack(side='left', padx=5)
+        tk.Button(button_frame, text='Cancel', width=10, command=self.destroy).pack(side='left')
+
+        self._build_calendar()
+        self.update_idletasks()
+        self.deiconify()
+
+    def _build_calendar(self):
+        for w in self.cal_frame.winfo_children():
+            w.destroy()
+
+        self.title_lbl.config(text=f"{calendar.month_name[self.month]} {self.year}")
+        wkday_names = ['Mo','Tu','We','Th','Fr','Sa','Su']
+        
+        # Place day names directly in cal_frame
+        for c, name in enumerate(wkday_names):
+            tk.Label(self.cal_frame, text=name, width=3).grid(row=0, column=c, padx=1, pady=1)
+
+        month_mat = calendar.monthcalendar(self.year, self.month)
+        for r, week in enumerate(month_mat, start=1):
+            for c, day in enumerate(week):
+                if day == 0:
+                    tk.Label(self.cal_frame, text='', width=3).grid(row=r, column=c, padx=1, pady=1)
+                else:
+                    style = {}
+                    if day == self.day:
+                        style['bg'] = '#4caf50'
+                        style['fg'] = 'white'
+                    b = tk.Button(self.cal_frame, text=str(day), width=3,
+                                  command=lambda d=day: self._select_day(d), **style)
+                    b.grid(row=r, column=c, padx=1, pady=1)
+
+    def _select_day(self, day: int):
+        self.day = day
+        self._build_calendar()
+
+    def _prev_month(self):
+        if self.month == 1:
+            self.month = 12
+            self.year -= 1
+        else:
+            self.month -= 1
+        self._build_calendar()
+
+    def _next_month(self):
+        if self.month == 12:
+            self.month = 1
+            self.year += 1
+        else:
+            self.month += 1
+        self._build_calendar()
+
+    def _confirm(self):
+        if self.day is None:
+            messagebox.showwarning('Select Date', 'Please select a date')
+            return
+        
+        try:
+            hour = int(self.hour_var.get())
+            minute = int(self.minute_var.get())
+            second = int(self.second_var.get())
+            
+            dt = datetime(self.year, self.month, self.day, hour, minute, second)
+            self.select_callback(dt.strftime('%Y-%m-%d %H:%M:%S'))
+            self.destroy()
+        except ValueError:
+            messagebox.showerror('Invalid Time', 'Please enter valid time values')
+
+
+
 class SensorGUI(tk.Tk):
     """GUI for wireless sensor data logger with professional ACUCAST-style interface"""
     
@@ -2223,7 +2358,7 @@ class SettingsFrame(tk.Frame):
         tk.Label(hist_content, text="Measurement History", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         
-        # Date range inputs for export
+        # Date/Time range inputs for export
         self.date_from_var = tk.StringVar(value="")
         self.date_to_var = tk.StringVar(value="")
 
@@ -2233,14 +2368,14 @@ class SettingsFrame(tk.Frame):
         tk.Label(range_frame, text="From:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
         from_box = tk.Frame(range_frame, bg="#f0f0f0")
         from_box.pack(side="left", padx=(5, 15))
-        tk.Entry(from_box, textvariable=self.date_from_var, width=18, font=("Arial", 10)).pack(side="left")
-        tk.Button(from_box, text="📅", width=3, command=lambda: CalendarPopup(self, lambda d: self.date_from_var.set(d))).pack(side="left", padx=(6,0))
+        tk.Entry(from_box, textvariable=self.date_from_var, width=22, font=("Arial", 10)).pack(side="left")
+        tk.Button(from_box, text="📅", width=3, command=lambda: DateTimePopup(self, lambda d: self.date_from_var.set(d))).pack(side="left", padx=(6,0))
 
         tk.Label(range_frame, text="To:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
         to_box = tk.Frame(range_frame, bg="#f0f0f0")
         to_box.pack(side="left", padx=(5, 15))
-        tk.Entry(to_box, textvariable=self.date_to_var, width=18, font=("Arial", 10)).pack(side="left")
-        tk.Button(to_box, text="📅", width=3, command=lambda: CalendarPopup(self, lambda d: self.date_to_var.set(d))).pack(side="left", padx=(6,0))
+        tk.Entry(to_box, textvariable=self.date_to_var, width=22, font=("Arial", 10)).pack(side="left")
+        tk.Button(to_box, text="📅", width=3, command=lambda: DateTimePopup(self, lambda d: self.date_to_var.set(d))).pack(side="left", padx=(6,0))
 
         tk.Button(range_frame, text="📥 Export Range to CSV", bg="#0066cc", fg="white",
               font=("Arial", 11, "bold"), command=self.export_csv).pack(side="right")
