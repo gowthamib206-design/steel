@@ -472,13 +472,11 @@ def voltage_uV_to_temperature_C(uV):
      c = coeffs[i]
      t = c * (v ** i)
      terms.append(t)
-     print(f"t{i} = {c} * (v^{i}) = {t}")
      
 
 # sum all terms
     temp_C = sum(terms)
-    print(f"Final Temperature (°C) = {temp_C}")
-    print(f"uV={uV} ,v(mV)={v}, coeffs={coeffs}, temp_C={temp_C}")
+    logger.debug(f"Thermocouple voltage {uV}µV converted to temperature {temp_C}°C")
 
 
     return temp_C
@@ -561,7 +559,7 @@ class SerialPortManager:
                 logger.error(error_msg)
                 return False, error_msg
             
-            self.ser = serial.Serial(port, baudrate, timeout=1)
+            self.serial = serial.Serial(port, baudrate, timeout=1)
             self.is_open = True
             success_msg = f"Successfully opened {port}"
             logger.info(success_msg)
@@ -595,8 +593,8 @@ class SerialPortManager:
     def read_byte(self) -> Optional[bytes]:
         """Read single byte from serial port"""
         try:
-            if self.ser and self.is_open:
-                data = self.ser.read(1)
+            if self.serial and self.is_open:
+                data = self.serial.read(1)
                 return data if data else None
             return None
         except serial.SerialException as e:
@@ -692,8 +690,6 @@ class SensorDataParser:
             temp = (temp << 8) | packet[1]
             temp = (temp << 8) | packet[0]
             temp = temp / 10000.0
-            for i, b in enumerate(packet):
-             print(f"Byte {i}: {b}")
             
             if temp < -100 or temp > 100:
                 logger.warning(f"Temperature out of reasonable range: {temp}")
@@ -759,7 +755,8 @@ class SensorDataParser:
                 logger.error("Parsed sensor data validation failed")
                 raise ValueError("Invalid sensor data")
             
-            logger.info(f"Successfully parsed packet: temp={temp}, rtd={rtd_resistance:.3f}, battery={battery_voltage}V")
+            logger.debug(f"Successfully parsed packet: temp={temp}°C, rtd_temp={rtd_temperature}°C, "
+                          f"tc_temp={thermo_temperature_C:.1f}°C, rtd={rtd_resistance:.3f}Ω, battery={battery_voltage}V")
             return sensor_data
         
         except (IndexError, struct.error, ValueError) as e:
@@ -1066,6 +1063,10 @@ class DashboardFrame(tk.Frame):
     def on_rtd_compensation_changed(self):
         """Handle RTD compensation checkbox toggle"""
         enabled = self.controller.apply_rtd_compensation.get()
+        logger.info(f"RTD Compensation checkbox toggled: {enabled}")
+        
+        # Clear thermocouple FIFO buffer to avoid stale data
+        self.tc_fifo.clear()
         
         # Send command to hardware
         self.send_rtd_compensation_command(enabled)
@@ -1084,13 +1085,16 @@ class DashboardFrame(tk.Frame):
                 logger.info("RTD Compensation DISABLED - Command sent to hardware")
             
             # Send via serial port
-            if hasattr(self.controller, 'serial') and self.controller.serial and self.controller.serial.is_open:
-                self.controller.serial.write(cmd)
-                logger.info(f"Sent command to hardware: {cmd.decode().strip()}")
+            if (hasattr(self.controller, 'port_manager') and 
+                hasattr(self.controller.port_manager, 'serial') and 
+                self.controller.port_manager.serial and 
+                self.controller.port_manager.serial.is_open):
+                self.controller.port_manager.serial.write(cmd)
+                logger.info(f"Sent RTD command to hardware: {cmd.decode().strip()}")
             else:
-                logger.warning("Serial port not ready. Hardware command not sent, but software compensation will be applied.")
+                logger.info("Serial port not available. Hardware command not sent, but software compensation will be applied based on checkbox state.")
         except Exception as e:
-            logger.error(f"Error sending RTD command: {e}")
+            logger.error(f"Error sending RTD command to hardware: {e}", exc_info=True)
   
 
     def check_battery(self, battery_text):
@@ -1222,28 +1226,50 @@ class DashboardFrame(tk.Frame):
                packet,
                enable_rtd_compensation=self.controller.apply_rtd_compensation.get()
            )
-           # ===============================
-# TRANSMITTER DISCOVERY
+        except Exception as e:
+           logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {e}", exc_info=True)
+           return   # Exit only if parsing completely fails
+        
+        # ===============================
+# TRANSMITTER DISCOVERY & FILTERING
 # ===============================
-           tx_id = getattr(data, "device_id", None)
-
+        tx_id = getattr(data, "device_id", None)
+        
+        try:
            conn = getattr(self, "connection_window", None)
 
            if conn and tx_id:
             tx_id = str(tx_id)
 
+            # Add to list if new
             if tx_id not in conn.tx_ids:
               conn.tx_ids.append(tx_id)
               conn.tx_combo["values"] = conn.tx_ids
+              logger.info(f"Discovered new transmitter: {tx_id}")
 
-        # Auto-select first TX
+            # Auto-select first TX
             if len(conn.tx_ids) == 1:
               conn.tx_combo.current(0)
               conn.selected_tx = tx_id
               self.controller.transmitter_id_val.set(tx_id)
- 
-        except Exception:
-           return   # Exit only if parsing completely fails
+              logger.info(f"Auto-selected first transmitter: {tx_id}")
+        except Exception as e:
+           logger.error(f"Error in transmitter discovery: {e}", exc_info=True)
+        
+        # ===============================
+# FILTER: Only process data if transmitter ID is selected and matches
+# ===============================
+        conn = getattr(self, "connection_window", None)
+        selected_tx = conn.selected_tx if conn else None
+        
+        # If a transmitter is selected, only process its data
+        if selected_tx and str(tx_id) != str(selected_tx):
+            logger.debug(f"Packet from {tx_id} ignored - only processing {selected_tx}")
+            return
+        
+        # If no transmitter is selected yet, show the data anyway (useful during discovery)
+        if not selected_tx and conn:
+            logger.debug(f"No transmitter selected yet, processing packet from {tx_id}")
         
         # -------- DEVICE TEMPERATURE --------
         device_temp = getattr(data, "temperature", None)
@@ -1682,8 +1708,21 @@ class ConnectionSettings(tk.Toplevel):
         # self.destroy()
 
     def on_tx_selected(self, event):
+        """Handle transmitter ID selection change"""
         self.selected_tx = self.tx_combo.get()
         self.controller.transmitter_id_val.set(self.selected_tx)
+        logger.info(f"Transmitter ID selected: {self.selected_tx}")
+        
+        # Clear UI data buffers when switching transmitters to avoid showing stale data
+        if hasattr(self.dashboard, 'tc_fifo'):
+            self.dashboard.tc_fifo.clear()
+        
+        # Reset temperature displays
+        self.controller.current_temp.set("--")
+        self.controller.rtd_temp.set("--")
+        self.controller.thermo_val.set("--")
+        self.controller.battery_val.set("--")
+        self.controller.rssi_val.set("--")
 
 
     def disconnect(self):
