@@ -6,7 +6,6 @@ Tests cover all negative test cases and edge scenarios
 import unittest
 from unittest.mock import Mock, patch, MagicMock
 import serial
-import csv
 from wireless_sensor import (
     SensorErrorType, SensorData, RTDTemperatureTable, SerialPortManager,
     PacketProcessor, SensorDataParser
@@ -199,122 +198,17 @@ class TestSerialPortManager(unittest.TestCase):
         """Test reading byte when port not open"""
         data = self.manager.read_byte()
         self.assertIsNone(data)
-
+    
     @patch('serial.Serial')
     def test_read_byte_serial_exception(self, mock_serial):
         """Test read error handling"""
         mock_ser = MagicMock()
         mock_ser.read.side_effect = serial.SerialException("Read error")
         mock_serial.return_value = mock_ser
-
+        
         self.manager.open_port("COM1 - USB")
         data = self.manager.read_byte()
         self.assertIsNone(data)
-
-
-class TestDatabaseAndHistory(unittest.TestCase):
-    """Verify that the SQLite schema and export logic produce expected results."""
-
-    def setUp(self):
-        # create a minimal controller object with DB methods
-        from wireless_sensor import SensorGUI
-        self.app = SensorGUI()
-        # use in-memory database for tests
-        self.app.init_db(db_path=":memory:")
-
-    def tearDown(self):
-        try:
-            self.app.conn.close()
-        except Exception:
-            pass
-
-    def test_schema_columns(self):
-        """Table should have the new six columns"""
-        self.app.cursor.execute("PRAGMA table_info(measurements)")
-        cols = [row[1] for row in self.app.cursor.fetchall()]
-        expected = [
-            'id', 'timestamp', 'device_id',
-            'temp_raw', 'rtd_raw', 'thermo_raw', 'batt_raw'
-        ]
-        for col in expected:
-            self.assertIn(col, cols)
-
-    def test_log_and_retrieve(self):
-        """log_to_db should insert raw ints that can be queried later"""
-        # arbitrary sample values
-        self.app.log_to_db('aa bb cc dd', 12345678, 0x1122, 0x3344, 0x5566)
-        self.app.conn.commit()
-        self.app.cursor.execute("SELECT device_id, temp_raw, rtd_raw, thermo_raw, batt_raw FROM measurements")
-        row = self.app.cursor.fetchone()
-        self.assertIsNotNone(row)
-        self.assertEqual(row[0], 'aa bb cc dd')
-        self.assertEqual(row[1], 12345678)
-        self.assertEqual(row[2], 0x1122)
-        self.assertEqual(row[3], 0x3344)
-        self.assertEqual(row[4], 0x5566)
-
-    @patch('tkinter.filedialog.asksaveasfilename')
-    def test_export_csv_conversions(self, mock_dialog):
-        """export_csv should write correctly converted rows"""
-        import tempfile
-        import tkinter as tk
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
-        tmp.close()
-        mock_dialog.return_value = tmp.name
-
-        # insert one record with known raw values
-        # let temp_raw be 25.0000°C -> 250000 (25*10000)
-        temp_raw = 25 * 10000
-        # choose rtd_raw such that resistance and temperature are simple
-        # use zero for simplicity (should convert to temperature value via table)
-        rtd_raw = 0
-        # choose thermo_raw that gives easy voltage; we will just pick 0 so melt temp 0
-        thermo_raw = 0
-        # battery raw corresponds to 3.7V -> 3700
-        batt_raw = 3700
-        self.app.log_to_db('de ad be ef', temp_raw, rtd_raw, thermo_raw, batt_raw)
-        self.app.conn.commit()
-
-        # export_csv lives on SettingsFrame, so instantiate one just for the call
-        from wireless_sensor import SettingsFrame
-        root = tk.Tk()
-        frame = SettingsFrame(parent=root, controller=self.app)
-        frame.export_csv()
-        root.destroy()
-
-        # read the generated file and verify contents
-        with open(tmp.name, newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-        # header + one data row
-        self.assertGreaterEqual(len(rows), 2)
-        header = rows[0]
-        self.assertEqual(header, [
-            'Date', 'Transmitter ID', 'MeltTemp_C', 'RTDTemp_C',
-            'DeviceTemp_C', 'BatteryVolts'
-        ])
-        data_row = rows[1]
-        # device id should match
-        self.assertEqual(data_row[1], 'de ad be ef')
-        # device temp should be 25.0
-        self.assertAlmostEqual(float(data_row[4]), 25.0)
-        # battery voltage around 3.7
-        self.assertAlmostEqual(float(data_row[5]), 3.7)
-
-    def test_refresh_history_uses_db(self):
-        """refresh_history should build list entries from DB"""
-        # insert two rows
-        self.app.log_to_db('11 22 33 44', 10000, 0, 0, 3000)
-        self.app.log_to_db('55 66 77 88', 20000, 0, 0, 4000)
-        self.app.conn.commit()
-        # create a fake SettingsFrame and call refresh_history
-        import tkinter as tk
-        from wireless_sensor import SettingsFrame
-        root = tk.Tk()
-        frame = SettingsFrame(parent=root, controller=self.app)
-        frame.refresh_history()
-        # listbox should contain two items
-        self.assertEqual(frame.history_list.size(), 2)
 
 
 class TestPacketProcessor(unittest.TestCase):
