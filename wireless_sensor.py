@@ -392,20 +392,33 @@ class SerialPortManager:
     def __init__(self):
          self.serial = None          # ✅ ADD THIS LINE
          self.is_open = False
-       
+         self.current_port = None 
     
-    def get_available_ports(self) -> List[str]:
-        """Get list of available serial ports"""
-        try:
-            ports = [f"{p.device} - {p.description}" for p in serial.tools.list_ports.comports()]
-            if not ports:
-                logger.warning("No serial ports available")
-                return []
-            logger.info(f"Found {len(ports)} available ports")
-            return ports
-        except Exception as e:
-            logger.error(f"Error getting available ports: {e}")
-            return []
+    def get_available_ports(self, exclude_connected=False) -> List[str]:
+       """Get list of available serial ports
+    
+       Args:
+          exclude_connected: If True, exclude the currently connected port
+    """
+       try:
+           all_ports = [f"{p.device} - {p.description}" for p in serial.tools.list_ports.comports()]
+           if not all_ports:
+             logger.warning("No serial ports available")
+             return []
+           if exclude_connected and self.current_port:
+            # Extract just the device name from current_port (e.g., "COM3" from "COM3 - USB...")
+              current_device = self.current_port.split(" - ")[0].strip() if " - " in self.current_port else self.current_port
+            
+            # Filter out the connected port by matching the device name
+              filtered_ports = [p for p in all_ports if not p.startswith(current_device)]
+              logger.info(f"Found {len(all_ports)} total ports, showing {len(filtered_ports)} available (excluded: {current_device})")
+              return filtered_ports
+        
+           logger.info(f"Found {len(all_ports)} available ports")
+           return all_ports
+       except Exception as e:
+          logger.error(f"Error getting available ports: {e}")
+          return []
     
     def open_port(self, port_str: str, baudrate: int = 115200) -> Tuple[bool, str]:
         """Open serial port"""
@@ -425,6 +438,7 @@ class SerialPortManager:
             
             self.serial = serial.Serial(port, baudrate, timeout=1)
             self.is_open = True
+            self.current_port = port  # Track the connected port
             success_msg = f"Successfully opened {port}"
             logger.info(success_msg)
             return True, success_msg
@@ -442,9 +456,11 @@ class SerialPortManager:
         """Close serial port"""
         try:
             if self.serial and self.serial.is_open:
-             self.serial.close()
-             self.serial = None
-             self.is_open = False
+                self.serial.close()
+                self.serial = None
+                self.is_open = False
+                self.current_port = None  # Clear the tracked port
+                return True, "Port closed successfully"
             else:
                 error_msg = "Port is not open"
                 logger.warning(error_msg)
@@ -453,6 +469,7 @@ class SerialPortManager:
             error_msg = f"Error closing port: {e}"
             logger.error(error_msg)
             return False, error_msg
+      
     
     def read_byte(self) -> Optional[bytes]:
         """Read single byte from serial port"""
@@ -2070,14 +2087,25 @@ class ConnectionSettings(tk.Toplevel):
         logger.info("Connection Settings window closed")
         self.destroy()
 
-    def update_ports(self):
+    """def update_ports(self):
         ports = self.controller.port_manager.get_available_ports()
         self.combo["values"] = ports if ports else []
         if ports:
             try:
                 self.combo.current(0)
             except Exception:
-                pass
+                pass"""
+    
+    def update_ports(self):
+        """Update available ports, excluding the currently connected port"""
+       # Get all ports except the currently connected one
+        ports = self.controller.port_manager.get_available_ports(exclude_connected=True)
+        self.combo["values"] = ports if ports else []
+        if ports and not self.combo.get():  # Only set default if none selected
+           try:
+              self.combo.current(0)
+           except Exception:
+             pass
 
     def ask_password(self):
         """Prompt for password; enable controls only if correct."""
@@ -2325,17 +2353,27 @@ class SettingsFrame(tk.Frame):
         com_frame.pack(fill="x", pady=10)
         """self.create_combobox_row(com_frame, "Port:", controller.com_port, ["COM1", "COM2", "COM3", "USB-SERIAL"])"""
         
-        # Port dropdown with REFRESH button
-        port_frame = tk.Frame(com_frame, bg="#f0f0f0")
-        port_frame.pack(fill="x", pady=8)
-        tk.Label(port_frame, text="Port:", width=20, anchor="e", bg="#f0f0f0", 
+        # ✅ ADD THIS SECTION (Port dropdown with REFRESH button)
+        port_select_frame = tk.Frame(com_frame, bg="#f0f0f0")
+        port_select_frame.pack(fill="x", pady=8)
+
+        tk.Label(port_select_frame, text="Port:", width=20, anchor="e", bg="#f0f0f0", 
          font=("Arial", 12, "bold")).pack(side="left")
 
-        self.port_combo = ttk.Combobox(port_frame, state="readonly", font=("Arial", 11), width=25)
-        self.port_combo.pack(side="left", padx=15)
+        self.output_port_combo = ttk.Combobox(port_select_frame, width=25, state="readonly")
+        self.output_port_combo.pack(side="left", padx=15)
 
+# Refresh button to update available ports
+        tk.Button(port_select_frame, text="🔄 REFRESH", bg="#cccccc", fg="black", 
+         font=("Arial", 10, "bold"), width=12, 
+         command=self.refresh_output_ports).pack(side="left", padx=5)
+
+# Populate ports on tab initialization
+        self.refresh_output_ports()
+
+# Original baud rate row
         self.create_combobox_row(com_frame, "Baud Rate:", controller.baud_rate, ["9600", "19200", "38400", "115200"])
-        
+
         self.out_notebook = ttk.Notebook(outputs_content)
         self.out_notebook.pack(fill="both", expand=True, padx=0, pady=10)
         
@@ -2378,6 +2416,15 @@ class SettingsFrame(tk.Frame):
         diag_frame.pack(fill="x", pady=10)
         self.create_diag_row(diag_frame, "Raw ADC Hex:", controller.raw_hex)
         self.create_diag_row(diag_frame, "Battery Voltage:", controller.bat_voltage)
+
+        # ✅ ADD THIS SECTION (Port diagnostics)
+        port_diag_frame = tk.LabelFrame(debug_content, text="Port Diagnostics", bg="#f0f0f0", 
+                               font=("Arial", 12, "bold"), padx=15, pady=15)
+        port_diag_frame.pack(fill="x", pady=10)
+
+        self.create_diag_row(port_diag_frame, "Connected Port:", controller.com_port_val)
+        self.create_diag_row(port_diag_frame, "Connection Status:", controller.status_msg)
+        self.create_diag_row(port_diag_frame, "Transmitter ID:", controller.transmitter_id_val)
         
         # ========== TAB 6: HISTORY ==========
         self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
@@ -2484,6 +2531,29 @@ class SettingsFrame(tk.Frame):
                 btn.config(bg="#b0b0b0", relief="raised")  # Inactive button
     
     # ==================== HELPER METHODS ====================
+
+    def refresh_output_ports(self):
+       """Refresh available ports in the Outputs tab, excluding connected port"""
+       all_ports = self.controller.port_manager.get_available_ports(exclude_connected=True)
+    
+    # Populate dropdown
+       self.output_port_combo["values"] = all_ports if all_ports else []
+    
+    # Set to current port if available
+       current_port = self.controller.com_port_val.get()
+       if current_port and current_port != "NOT CONNECTED":
+         for port in all_ports:
+            if current_port in port:
+                self.output_port_combo.set(port)
+                break
+       elif all_ports:
+        try:
+            self.output_port_combo.current(0)
+        except Exception:
+            pass
+    
+        logger.info(f"Refreshed output ports: {len(all_ports)} available")
+
     def create_static_row(self, parent, label, value):
         f = tk.Frame(parent, bg="#f0f0f0")
         f.pack(fill="x", pady=8)
