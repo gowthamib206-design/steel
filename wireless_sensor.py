@@ -419,38 +419,39 @@ class SerialPortManager:
        except Exception as e:
           logger.error(f"Error getting available ports: {e}")
           return []
-    
+       
     def open_port(self, port_str: str, baudrate: int = 115200) -> Tuple[bool, str]:
         """Open serial port"""
         if not port_str:
-            error_msg = "Port string is empty"
-            logger.error(error_msg)
-            return False, error_msg
-        
+          error_msg = "Port string is empty"
+          logger.error(error_msg)
+          return False, error_msg
+    
         try:
-            parts = port_str.split(" - ")
-            port = parts[0].strip() if parts else None
-            
-            if not port:
-                error_msg = "Invalid port format"
-                logger.error(error_msg)
-                return False, error_msg
-            
-            self.serial = serial.Serial(port, baudrate, timeout=1)
-            self.is_open = True
-            self.current_port = port  # Track the connected port
-            success_msg = f"Successfully opened {port}"
-            logger.info(success_msg)
-            return True, success_msg
+          parts = port_str.split(" - ")
+          port = parts[0].strip() if parts else None
         
+          if not port:
+            error_msg = "Invalid port format"
+            logger.error(error_msg)
+            return False, error_msg
+        
+          self.serial = serial.Serial(port, baudrate, timeout=1)
+          self.is_open = True
+        # Store FULL port string with description for proper exclusion later
+          self.current_port = port_str  # Changed: store the full string like "COM3 - USB Serial Port"
+          success_msg = f"Successfully opened {port}"
+          logger.info(success_msg)
+          return True, success_msg
+    
         except serial.SerialException as e:
-            error_msg = f"Serial error: {e}"
-            logger.error(error_msg)
-            return False, error_msg
+          error_msg = f"Serial error: {e}"
+          logger.error(error_msg)
+          return False, error_msg
         except Exception as e:
-            error_msg = f"Unexpected error opening port: {e}"
-            logger.error(error_msg)
-            return False, error_msg
+           error_msg = f"Unexpected error opening port: {e}"
+           logger.error(error_msg)
+           return False, error_msg
     
     def close_port(self) -> Tuple[bool, str]:
         """Close serial port"""
@@ -610,6 +611,8 @@ class SensorDataParser:
             
             if battery_voltage < 0 or battery_voltage > 10:
                 logger.warning(f"Battery voltage out of range: {battery_voltage}")
+
+            print(f"raw thermo: {thermo_raw}, uV: {thermo_uV}, temp: {thermo_temperature_C},rtd temp: {rtd_temperature}, rtd resistance: {rtd_resistance}")
             
             sensor_data = SensorData(
                 temperature=temp,
@@ -1778,7 +1781,7 @@ class DashboardFrame(tk.Frame):
             ts = datetime.now().strftime("%H:%M:%S")
             # history display still uses simplified string
             self.controller.history_display.appendleft(
-                f"{ts} | Melt:{new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
+                f"{ts} | Melt:{new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi}dBm"
             )
             if "DashboardFrame" in self.controller.frames:
                 try:
@@ -2095,17 +2098,50 @@ class ConnectionSettings(tk.Toplevel):
                 self.combo.current(0)
             except Exception:
                 pass"""
-    
+   
+    # In ConnectionSettings class, REPLACE the update_ports() method with:
+
     def update_ports(self):
-        """Update available ports, excluding the currently connected port"""
-       # Get all ports except the currently connected one
-        ports = self.controller.port_manager.get_available_ports(exclude_connected=True)
+        """Update available ports - show ALL ports including the currently connected one.
+    
+         This allows users to:
+         - See which port they're currently connected to
+         - Switch to a different port
+         - Reconnect to the same port if needed
+         """
+    # Get all available ports (do NOT exclude the connected port)
+        ports = self.controller.port_manager.get_available_ports(exclude_connected=False)
+    
         self.combo["values"] = ports if ports else []
-        if ports and not self.combo.get():  # Only set default if none selected
+    
+    # Try to select the currently connected port if available
+        connected_port = self.controller.com_port_val.get()
+        if connected_port and connected_port != "NOT CONNECTED":
            try:
-              self.combo.current(0)
-           except Exception:
-             pass
+            # Find and select the connected port in the dropdown
+               index = ports.index(connected_port) if ports else -1
+               if index >= 0:
+                  self.combo.current(index)
+                  logger.info(f"Connection Settings: Currently connected to {connected_port}")
+               else:
+                # Connected port not in list, select first available
+                  if ports:
+                     self.combo.current(0)
+           except (ValueError, tk.TclError):
+              if ports:
+                try:
+                    self.combo.current(0)
+                except Exception:
+                    pass
+        else:
+        # Not connected, select first available port
+           if ports:
+               try:
+                  self.combo.current(0)
+               except Exception:
+                pass
+    
+        logger.info(f"Connection Settings: Showing {len(ports)} available ports (including connected)")
 
     def ask_password(self):
         """Prompt for password; enable controls only if correct."""
@@ -2155,27 +2191,31 @@ class ConnectionSettings(tk.Toplevel):
             self.status_label.config(text="Ready to connect", fg="black")
             logger.info("✓ Restored: CONNECT enabled, DISCONNECT disabled")
 
-
     def connect(self):
-        port = self.combo.get()
-        if not port:
-            messagebox.showerror("Error", "Select a COM port", parent=self)
-            return
+       port = self.combo.get()
+       if not port:
+          messagebox.showerror("Error", "Select a COM port", parent=self)
+          return
 
-        # Disable connect, enable disconnect
-        self.btn_connect.config(state="disabled")
-        self.btn_disconnect.config(state="normal")
-        self.dashboard.combo = self.combo
-        self.dashboard._open_port()
-        self._is_connected = True
-        self.dashboard.is_connected = True
+      # Disable connect, enable disconnect
+       self.btn_connect.config(state="disabled")
+       self.btn_disconnect.config(state="normal")
+       self.dashboard.combo = self.combo
+    
+    # ✅ ADD THIS LINE - Set the port immediately
+       self.controller.com_port_val.set(port)
+    
+       self.dashboard._open_port()
+       self._is_connected = True
+       self.dashboard.is_connected = True
 
-         # ✅ SAVE CONNECTION STATE to controller
-        self.controller.connection_status = "connected"
-        self.dashboard.is_connected = True
-        
-        self.status_label.config(text=f"✓ Connected to {port}", fg="green")
-        logger.info(f"[CONNECT] Button state SAVED: connected")
+     # ✅ SAVE CONNECTION STATE to controller
+       self.controller.connection_status = "connected"
+       self.dashboard.is_connected = True
+    
+       self.status_label.config(text=f"✓ Connected to {port}", fg="green")
+       logger.info(f"[CONNECT] Button state SAVED: connected")
+    
 
 
     def on_tx_selected(self, event):
@@ -2196,21 +2236,25 @@ class ConnectionSettings(tk.Toplevel):
         self.controller.rssi_val.set("--")
 
     def disconnect(self):
-        self.dashboard._close_port()
+       self.dashboard._close_port()
 
-        # Enable connect, disable disconnect
-        self.controller.connection_status = "disconnected"
-        self.dashboard.is_connected = False
-            # After disconnect, update button states
-        self.btn_connect.config(state="normal")
-        self.btn_disconnect.config(state="disabled")
-        self.status_label.config(text="Disconnected — ready to connect", fg="black")
-        
+    # Enable connect, disable disconnect
+       self.controller.connection_status = "disconnected"
+       self.dashboard.is_connected = False
+    
+    # ✅ ADD THIS LINE - Clear the port value
+       self.controller.com_port_val.set("NOT CONNECTED")
+    
+    # After disconnect, update button states
+       self.btn_connect.config(state="normal")
+       self.btn_disconnect.config(state="disabled")
+       self.status_label.config(text="Disconnected — ready to connect", fg="black")
+    
 
-        # Clear TX dropdown
-        self.tx_ids.clear()
-        self.tx_combo["values"] = []
-        self.selected_tx = None
+    # Clear TX dropdown
+       self.tx_ids.clear()
+       self.tx_combo["values"] = []
+       self.selected_tx = None
 
 class SettingsFrame(tk.Frame):
     """Settings frame - Configuration"""
@@ -2370,10 +2414,11 @@ class SettingsFrame(tk.Frame):
 
 # Populate ports on tab initialization
         self.refresh_output_ports()
+        self.controller.com_port_val.trace_add('write', lambda *args: self.on_port_changed())
 
 # Original baud rate row
         self.create_combobox_row(com_frame, "Baud Rate:", controller.baud_rate, ["9600", "19200", "38400", "115200"])
-
+        
         self.out_notebook = ttk.Notebook(outputs_content)
         self.out_notebook.pack(fill="both", expand=True, padx=0, pady=10)
         
@@ -2534,25 +2579,42 @@ class SettingsFrame(tk.Frame):
 
     def refresh_output_ports(self):
        """Refresh available ports in the Outputs tab, excluding connected port"""
-       all_ports = self.controller.port_manager.get_available_ports(exclude_connected=True)
+    # Get current connected port
+       connected_port = self.controller.com_port_val.get()
     
-    # Populate dropdown
-       self.output_port_combo["values"] = all_ports if all_ports else []
+    # Get all available ports
+       all_ports = self.controller.port_manager.get_available_ports(exclude_connected=False)
     
-    # Set to current port if available
-       current_port = self.controller.com_port_val.get()
-       if current_port and current_port != "NOT CONNECTED":
-         for port in all_ports:
-            if current_port in port:
-                self.output_port_combo.set(port)
-                break
-       elif all_ports:
-        try:
-            self.output_port_combo.current(0)
-        except Exception:
-            pass
+    # Manually filter out the connected port if one is connected
+       filtered_ports = []
+       if connected_port and connected_port != "NOT CONNECTED":
+        # Extract device name (e.g., "COM8" from "COM8 - USB Serial Port")
+          connected_device = connected_port.split(" - ")[0].strip()
+          filtered_ports = [p for p in all_ports if not p.startswith(connected_device)]
+          logger.info(f"Excluded connected port: {connected_device}")
+       else:
+        # No port connected, show all ports
+          filtered_ports = all_ports
     
-        logger.info(f"Refreshed output ports: {len(all_ports)} available")
+    # Populate the dropdown
+       self.output_port_combo["values"] = filtered_ports if filtered_ports else []
+    
+    # Clear selection (don't auto-select)
+       if not self.output_port_combo.get():
+          try:
+             self.output_port_combo.current(0)
+          except Exception:
+             pass
+    
+       logger.info(f"Output ports refreshed: {len(filtered_ports)} available (connected: {connected_port})")
+
+    # ============================================
+# ADD THIS NEW METHOD after refresh_output_ports()
+# ============================================
+    def on_port_changed(self):
+       """Callback when connected port changes - auto-refresh output ports"""
+       logger.info("Port changed detected - refreshing output ports")
+       self.after(100, self.refresh_output_ports)  # Refresh after short delay
 
     def create_static_row(self, parent, label, value):
         f = tk.Frame(parent, bg="#f0f0f0")
