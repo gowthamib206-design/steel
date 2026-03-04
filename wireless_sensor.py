@@ -2565,15 +2565,15 @@ class SettingsFrame(tk.Frame):
         self.tab_frames[tab_name].grid(row=0, column=0, sticky="nsew")
         
         # if we just navigated to history, refresh the list
-        if tab_name == "History" and hasattr(self, "refresh_history"):
-            self.refresh_history()
+        """if tab_name == "History" and hasattr(self, "refresh_history"):"""
+            #self.refresh_history()
         
         # Update button colors
-        for btn_name, btn in self.tab_buttons.items():
+        """for btn_name, btn in self.tab_buttons.items():
             if btn_name == tab_name:
                 btn.config(bg="#ffffff", relief="sunken")  # Active button
             else:
-                btn.config(bg="#b0b0b0", relief="raised")  # Inactive button
+                btn.config(bg="#b0b0b0", relief="raised")  # Inactive button"""
     
     # ==================== HELPER METHODS ====================
 
@@ -2682,7 +2682,7 @@ class SettingsFrame(tk.Frame):
                     f"{ts_h} | Melt:{melt_temp}{self.controller.units.get()} | "
                     f"RTD:{rtd_temp_val} | Bat:{bat_pct}%"
                 )
-                self.history_list.insert(tk.END, entry)
+                #self.history_list.insert(tk.END, entry)
         except Exception:
             # silently ignore if DB not ready
             pass
