@@ -1019,8 +1019,8 @@ class SensorGUI(tk.Tk):
         logger.info("Database initialized with updated schema (station_name + rssi)")
 
     def log_to_db(self,
-                  device_id: str,
                   station_name: str,
+                  device_id: str,
                   temp_raw: int,
                   rtd_raw: int,
                   thermo_raw: int,
@@ -1792,7 +1792,7 @@ class DashboardFrame(tk.Frame):
             except Exception:
                rssi_int = 0
 
-            self.controller.log_to_db(station_name, dev_id,temp_int,
+            self.controller.log_to_db(station_name,dev_id,temp_int,
             rtd_int,thermo_int,batt_int,rssi_int
           )
 
@@ -2519,8 +2519,8 @@ class SettingsFrame(tk.Frame):
         tk.Button(range_frame, text="📥 Export Range to CSV", bg="#0066cc", fg="white",
               font=("Arial", 11, "bold"), command=self.export_csv).pack(side="right")
 
-        self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
-        self.history_list.pack(fill="both", expand=True, pady=10)
+        """self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
+        self.history_list.pack(fill="both", expand=True, pady=10)"""
 
         # ========== TAB: RTD COMPENSATION ==========
         self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
@@ -2757,7 +2757,7 @@ class SettingsFrame(tk.Frame):
                 where_clauses.append("timestamp <= ?")
                 params.append(to_ts)
 
-            base_sql = "SELECT timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi FROM measurements"
+            base_sql = "SELECT timestamp,station_name, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi FROM measurements"
             if where_clauses:
                 sql = base_sql + " WHERE " + " AND ".join(where_clauses) + " ORDER BY id ASC"
                 self.controller.cursor.execute(sql, params)
