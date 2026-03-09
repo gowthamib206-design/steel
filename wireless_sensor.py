@@ -992,7 +992,7 @@ class SensorGUI(tk.Tk):
         try:
             self.cursor.execute("PRAGMA table_info(measurements)")
             cols = [row[1] for row in self.cursor.fetchall()]
-            if cols and 'device_id' not in cols:
+            if cols and ('station_name' not in cols or 'rssi' not in cols):
                 # Old schema detected, migrate by renaming old table and creating new one
                 logger.info("Old measurements table schema detected. Migrating to new schema...")
                 self.cursor.execute("ALTER TABLE measurements RENAME TO measurements_old")
@@ -1007,34 +1007,41 @@ class SensorGUI(tk.Tk):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT,
                 device_id TEXT,
+                station_name TEXT,
                 temp_raw INTEGER,
                 rtd_raw INTEGER,
                 thermo_raw INTEGER,
-                batt_raw INTEGER
+                batt_raw INTEGER,
+                rssi INTEGER
             )
         """)
         self.conn.commit()
+        logger.info("Database initialized with updated schema (station_name + rssi)")
 
     def log_to_db(self,
                   device_id: str,
+                  station_name: str,
                   temp_raw: int,
                   rtd_raw: int,
                   thermo_raw: int,
-                  batt_raw: int):
+                  batt_raw: int,
+                  rssi: int):
         """Insert raw measurement values into the database.
 
         Args:
             device_id: human-readable 4-byte ID string
+            station_name: Station name (e.g., "LADLE STATION 01")
             temp_raw: 32-bit integer representing temperature*10000
             rtd_raw: 16-bit raw ADC reading for RTD
             thermo_raw: 16-bit raw ADC reading for thermocouple
             batt_raw: 16-bit raw ADC reading for battery voltage
+            rssi: Signal strength indicator
         """
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             self.cursor.execute(
-                "INSERT INTO measurements (timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw) VALUES (?, ?, ?, ?, ?, ?)",
-                (ts, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw)
+                "INSERT INTO measurements (timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi)
             )
             # commit every 10 records instead of every single one
             if not hasattr(self, '_commit_counter'):
@@ -1043,6 +1050,7 @@ class SensorGUI(tk.Tk):
             if self._commit_counter >= 10:
                 self.conn.commit()
                 self._commit_counter = 0
+            logger.debug(f"Logged measurement: {station_name} | {device_id} | RSSI: {rssi}")
         except Exception as e:
             logger.error(f"Database error: {e}")
 
@@ -1776,7 +1784,17 @@ class DashboardFrame(tk.Frame):
 
             batt_int = (pkt[15] << 8) | pkt[14]
 
-            self.controller.log_to_db(dev_id, temp_int, rtd_int, thermo_int, batt_int)
+# WITH THIS:
+            station_name = self.controller.station_name.get() or "UNKNOWN"
+            rssi_val = getattr(data, "rssi", 0) or 0
+            try:
+               rssi_int = int(float(str(rssi_val).replace(" dBm", "").strip()))
+            except Exception:
+               rssi_int = 0
+
+            self.controller.log_to_db(station_name, dev_id,temp_int,
+            rtd_int,thermo_int,batt_int,rssi_int
+          )
 
             ts = datetime.now().strftime("%H:%M:%S")
             # history display still uses simplified string
@@ -2739,7 +2757,7 @@ class SettingsFrame(tk.Frame):
                 where_clauses.append("timestamp <= ?")
                 params.append(to_ts)
 
-            base_sql = "SELECT timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw FROM measurements"
+            base_sql = "SELECT timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi FROM measurements"
             if where_clauses:
                 sql = base_sql + " WHERE " + " AND ".join(where_clauses) + " ORDER BY id ASC"
                 self.controller.cursor.execute(sql, params)
@@ -2750,10 +2768,10 @@ class SettingsFrame(tk.Frame):
             with open(filename, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    "Date", "Transmitter ID", "MeltTemp_C", "RTDTemp_C",
-                    "DeviceTemp_C", "BatteryVolts"
+                    "Date", "Station Name", "Transmitter ID", "MeltTemp_C", "RTDTemp_C",
+                    "DeviceTemp_C", "BatteryVolts", "RSSI"
                 ])
-                for ts, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw in rows:
+                for ts, dev_id, station_name_db, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db in rows:
                     # date formatting
                     try:
                         dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
@@ -2770,10 +2788,12 @@ class SettingsFrame(tk.Frame):
                         rtd_temp_val = ""
                     device_temp = temp_raw / 10000.0
                     batt_volt = batt_raw / 1000.0
+                    rssi_str = f"{rssi_db} dBm" if rssi_db else "--"
+
 
                     writer.writerow([
-                        date_str, dev_id, melt_temp, rtd_temp_val,
-                        device_temp, batt_volt
+                        date_str, station_name_db, dev_id, melt_temp, rtd_temp_val,
+                        device_temp, batt_volt, rssi_str
                     ])
 
             messagebox.showinfo("Export Success", f"Data exported to {filename}")
