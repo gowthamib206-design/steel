@@ -179,7 +179,7 @@ class RTDTemperatureTable:
             index = min(range(len(cls.rtd_values)), 
                        key=lambda i: abs(cls.rtd_values[i] - rtd_resistance))
             nearest_temp = index - 200
-            logger.info(f"RTD resistance {rtd_resistance} -> temperature {nearest_temp}")
+            #logger.info(f"RTD resistance {rtd_resistance} -> temperature {nearest_temp}")
             return nearest_temp
         except Exception as e:
             logger.error(f"Error converting RTD resistance to temperature: {e}")
@@ -206,9 +206,9 @@ class ThermocoupleTable:
             temperature = index - 50
             logger.info(f"Thermocouple voltage {voltage} -> temperature {temperature}")
             return temperature
-        except Exception as e:
-            logger.error(f"Error converting thermocouple voltage to temperature: {e}")
-            raise ValueError(f"Failed to convert thermocouple voltage: {e}")
+        except Exception as exc:
+            logger.error(f"Error converting thermocouple voltage to temperature: {exc}")
+            raise ValueError(f"Failed to convert thermocouple voltage: {exc}")
 
     @classmethod
     def get_voltage_from_temperature(cls, temperature: int) -> float:
@@ -231,9 +231,9 @@ class ThermocoupleTable:
             
             logger.info(f"RTD temperature {temperature}°C -> thermocouple voltage {voltage_mV} mV ({voltage_uV} µV)")
             return voltage_mV
-        except Exception as e:
-            logger.error(f"Error converting temperature to thermocouple voltage: {e}")
-            raise ValueError(f"Failed to convert temperature: {e}")
+        except Exception as exc:
+            logger.error(f"Error converting temperature to thermocouple voltage: {exc}")
+            raise ValueError(f"Failed to convert temperature: {exc}")
 
 # =========================
 # Thermocouple calculation
@@ -272,7 +272,7 @@ def voltage_uV_to_temperature_C(uV):
         coeffs = COEFFS_HIGH
     else:
         coeffs = COEFFS_LOW if uV < RANGE_LOW_UV[0] else COEFFS_HIGH
-
+        logger.warning(f"Voltage {uV}µV outside standard range, using extrapolation")
     # polynomial expects millivolts
     v = uV 
 
@@ -381,8 +381,8 @@ def apply_rtd_compensation(rtd_temperature: int, thermo_uV: float) -> float:
                    f"TC_raw={thermo_uV}µV, Combined={combined_voltage_uV}µV, Result={compensated_temp}°C")
         
         return compensated_temp
-    except Exception as e:
-        logger.error(f"Error applying RTD compensation: {e}")
+    except Exception as exc:
+        logger.error(f"Error applying RTD compensation: {exc}")
         # Return original thermocouple temperature if compensation fails
         return voltage_uV_to_temperature_C(thermo_uV)
 
@@ -390,7 +390,7 @@ class SerialPortManager:
     """Manages serial port operations"""
     
     def __init__(self):
-         self.serial = None          # ✅ ADD THIS LINE
+         self.serial = None         
          self.is_open = False
          self.current_port = None 
          self.input_serial = None
@@ -420,10 +420,10 @@ class SerialPortManager:
               logger.info(f"Found {len(all_ports)} total ports, showing {len(filtered_ports)} available (excluded: {current_device})")
               return filtered_ports
         
-           logger.info(f"Found {len(all_ports)} available ports")
+           #logger.info(f"Found {len(all_ports)} available ports")
            return all_ports
-       except Exception as e:
-          logger.error(f"Error getting available ports: {e}")
+       except Exception as exc:
+          logger.error(f"Error getting available ports: {exc}")
           return []
        
     def open_port(self, port_str: str, baudrate: int = 115200) -> Tuple[bool, str]:
@@ -457,12 +457,12 @@ class SerialPortManager:
             logger.info(success_msg)
             return True, success_msg
         
-        except serial.SerialException as e:
-            error_msg = f"Serial error: {e}"
+        except serial.SerialException as exc:
+            error_msg = f"Serial error: {exc}"
             logger.error(error_msg)
             return False, error_msg
-        except Exception as e:
-            error_msg = f"Unexpected error opening port: {e}"
+        except Exception as exc:
+            error_msg = f"Unexpected error opening port: {exc}"
             logger.error(error_msg)
             return False, error_msg
     
@@ -482,8 +482,8 @@ class SerialPortManager:
                 error_msg = "Port is not open"
                 logger.warning(error_msg)
                 return False, error_msg
-        except Exception as e:
-            error_msg = f"Error closing port: {e}"
+        except Exception as exc:
+            error_msg = f"Error closing port: {exc}"
             logger.error(error_msg)
             return False, error_msg
     
@@ -494,12 +494,12 @@ class SerialPortManager:
                 data = self.serial.read(1)
                 return data if data else None
             return None
-        except serial.SerialException as e:
-            logger.error(f"Serial read error: {e}")
+        except serial.SerialException as exc:
+            logger.error(f"Serial read error: {exc}")
             self.is_open = False
             return None
-        except Exception as e:
-            logger.error(f"Unexpected error reading data: {e}")
+        except Exception as exc:
+            logger.error(f"Unexpected error reading data: {exc}")
             return None   
     
     
@@ -512,8 +512,10 @@ class SerialPortManager:
         if not port_str:
             error_msg = "Output port string is empty"
             logger.error(error_msg)
+            print(f"[DEBUG][OutputPort] {error_msg}")
             return False, error_msg
-            
+        
+               
         try:
             parts = port_str.split(" - ")
             port = parts[0].strip() if parts else None
@@ -521,6 +523,7 @@ class SerialPortManager:
             if not port:
                 error_msg = "Invalid output port format"
                 logger.error(error_msg)
+                print(f"[DEBUG][OutputPort] {error_msg}")
                 return False, error_msg
             
             # Prevent opening the same port for both input and output
@@ -528,27 +531,33 @@ class SerialPortManager:
             if input_device and port == input_device:
                 error_msg = "Cannot use the same port for both INPUT and OUTPUT"
                 logger.error(error_msg)
+                print(f"[DEBUG][OutputPort] {error_msg}")
                 return False, error_msg
             
             # Close existing output port first
             if self.output_serial and self.output_serial.is_open:
                 self.output_serial.close()
-            
+                print(f"[DEBUG][OutputPort] Closed previously open OUTPUT port.")
+            print(f"[DEBUG][OutputPort] Trying to open OUTPUT port: {port} @ {baudrate} baud")
+
             self.output_serial = serial.Serial(port, baudrate, timeout=1)
             self.output_is_open = True
             self.output_port = port_str
             
             success_msg = f"Successfully opened OUTPUT port {port} @ {baudrate} baud"
             logger.info(success_msg)
+            print(f"[DEBUG][OutputPort] {success_msg}")
             return True, success_msg
         
-        except serial.SerialException as e:
-            error_msg = f"Serial error on OUTPUT port: {e}"
+        except serial.SerialException as exc:
+            error_msg = f"Serial error on OUTPUT port: {exc}"
             logger.error(error_msg)
+            print(f"[DEBUG][OutputPort] {error_msg}")
             return False, error_msg
-        except Exception as e:
-            error_msg = f"Unexpected error opening OUTPUT port: {e}"
+        except Exception as exc:
+            error_msg = f"Unexpected error opening OUTPUT port: {exc}"
             logger.error(error_msg)
+            print(f"[DEBUG][OutputPort] {error_msg}")
             return False, error_msg
     
     def close_output_port(self) -> Tuple[bool, str]:
@@ -564,8 +573,8 @@ class SerialPortManager:
                 error_msg = "Output port is not open"
                 logger.warning(error_msg)
                 return False, error_msg
-        except Exception as e:
-            error_msg = f"Error closing output port: {e}"
+        except Exception as exc:
+            error_msg = f"Error closing output port: {exc}"
             logger.error(error_msg)
             return False, error_msg
     
@@ -573,21 +582,27 @@ class SerialPortManager:
         """Write data to OUTPUT port"""
         try:
             if self.output_serial and self.output_is_open:
+                #print(f"[DEBUG][OutputPort] Writing bytes to OUTPUT port: {data!r}")
                 bytes_written = self.output_serial.write(data)
                 self.output_serial.flush()
-                logger.debug(f"Wrote {bytes_written} bytes to OUTPUT port")
+                logger.info("OUTPUT WRITE HEX: %s", ' '.join(f"{b:02X}" for b in data))
+                #logger.debug(f"Wrote {bytes_written} bytes to OUTPUT port")
+                print(f"[DEBUG][OutputPort] Successfully wrote {bytes_written} bytes")
                 return True, f"Successfully wrote {bytes_written} bytes"
             else:
                 error_msg = "Output port is not open"
                 logger.warning(error_msg)
+                print(f"[DEBUG][OutputPort] {error_msg}")
                 return False, error_msg
-        except serial.SerialException as e:
-            error_msg = f"Serial write error on OUTPUT port: {e}"
+        except serial.SerialException as exc:
+            error_msg = f"Serial write error on OUTPUT port: {exc}"
             logger.error(error_msg)
+            print(f"[DEBUG][OutputPort] {error_msg}")
             return False, error_msg
-        except Exception as e:
-            error_msg = f"Unexpected error writing to OUTPUT port: {e}"
+        except Exception as exc:
+            error_msg = f"Unexpected error writing to OUTPUT port: {exc}"
             logger.error(error_msg)
+            print(f"[DEBUG][OutputPort] {error_msg}")
             return False, error_msg 
 
 
@@ -683,8 +698,8 @@ class SensorDataParser:
             rtd_temperature = None
             try:
                 rtd_temperature = RTDTemperatureTable.get_temperature_from_resistance(rtd_resistance)
-            except ValueError as e:
-                logger.error(f"Failed to convert RTD: {e}")
+            except ValueError as exc:
+                logger.error(f"Failed to convert RTD: {exc}")
                 rtd_temperature = None
             
             # Parse thermocouple from bytes 12-13 (2 bytes, big-endian)
@@ -697,8 +712,8 @@ class SensorDataParser:
                 try:
                     thermo_temperature_C = apply_rtd_compensation(rtd_temperature, thermo_uV)
                     logger.debug(f"RTD compensation applied: RTD={rtd_temperature}°C, Result={thermo_temperature_C}°C")
-                except Exception as e:
-                    logger.warning(f"RTD compensation failed: {e}, using raw thermocouple conversion")
+                except Exception as exc:
+                    logger.warning(f"RTD compensation failed: {exc}, using raw thermocouple conversion")
                     thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
             else:
                 thermo_temperature_C = voltage_uV_to_temperature_C(thermo_uV)
@@ -715,7 +730,7 @@ class SensorDataParser:
             if battery_voltage < 0 or battery_voltage > 10:
                 logger.warning(f"Battery voltage out of range: {battery_voltage}")
 
-            print(f"raw thermo: {thermo_raw}, uV: {thermo_uV}, temp: {thermo_temperature_C},rtd temp: {rtd_temperature}, rtd resistance: {rtd_resistance}")
+            print(f" uV: {thermo_uV}, temp: {thermo_temperature_C}, rtd resistance: {rtd_resistance}, battery voltage: {battery_voltage}, rssi: {rssi}")
             
             sensor_data = SensorData(
                 temperature=temp,
@@ -737,12 +752,12 @@ class SensorDataParser:
                           f"tc_temp={thermo_temperature_C:.1f}°C, rtd={rtd_resistance:.3f}Ω, battery={battery_voltage}V")
             return sensor_data
         
-        except (IndexError, struct.error, ValueError) as e:
-            logger.error(f"Error parsing packet: {e}")
-            raise ValueError(f"Packet parsing error: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error parsing packet: {e}")
-            raise ValueError(f"Unexpected parsing error: {e}")
+        except (IndexError, struct.error, ValueError) as exc:
+            logger.error(f"Error parsing packet: {exc}")
+            raise ValueError(f"Packet parsing error: {exc}")
+        except Exception as exc:
+            logger.error(f"Unexpected error parsing packet: {exc}")
+            raise ValueError(f"Unexpected parsing error: {exc}")
 
 
 class CalendarPopup(tk.Toplevel):
@@ -1119,7 +1134,7 @@ class SensorGUI(tk.Tk):
             )
         """)
         self.conn.commit()
-        logger.info("Database initialized with updated schema (station_name + rssi)")
+        #logger.info("Database initialized with updated schema (station_name + rssi)")
 
     def log_to_db(self,
                   station_name: str,
@@ -1154,8 +1169,33 @@ class SensorGUI(tk.Tk):
                 self.conn.commit()
                 self._commit_counter = 0
             logger.debug(f"Logged measurement: {station_name} | {device_id} | RSSI: {rssi}")
-        except Exception as e:
-            logger.error(f"Database error: {e}")
+        except Exception as exc:
+            logger.error(f"Database error: {exc}")
+
+    """def send_data_to_output_port(self,
+                                  station_name: str,
+                                  device_id: str,
+                                  temp_raw: int,
+                                  rtd_raw: int,
+                                  thermo_raw: int,
+                                  batt_raw: int,
+                                  rssi: int):
+       
+        if not self.port_manager.output_is_open:
+            logger.warning("Output port not open, skipping transmission")
+            return
+        
+        try:
+            # Format data as comma-separated string (customize as needed)
+            data_string = f"{station_name},{device_id},{temp_raw},{rtd_raw},{thermo_raw},{batt_raw},{rssi}\r\n"
+            success, msg = self.port_manager.write_data(data_string.encode('utf-8'))
+            
+            if success:
+                logger.info(f"Output: {msg}")
+            else:
+                logger.warning(f"Output write failed: {msg}")
+        except Exception as exc:
+            logger.error(f"Error sending to output port: {exc}")"""
 
     def update_buffer_size(self):
         """Recalculate in-memory buffers when time scale changes"""
@@ -1379,7 +1419,7 @@ class DashboardFrame(tk.Frame):
         footer.grid_propagate(False)
         
          # Settings button (right)
-        tk.Button(footer, text="⚙ PAIRED DEVICE", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
+        tk.Button(footer, text="⚙ PAIR DEVICE", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
                  width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
          
         # ⚙ CONFIGURATION Button - WITH PASSWORD (NEW)
@@ -1409,9 +1449,9 @@ class DashboardFrame(tk.Frame):
                 controller=self.controller,
                 dashboard=self
             )
-        except Exception as e:
+        except Exception as exc:
             logger.exception("Failed to open ConnectionSettings")
-            messagebox.showerror("Error", f"Unable to open connection settings:\n{e}")
+            messagebox.showerror("Error", f"Unable to open connection settings:\n{exc}")
         
 # -------------------------------
 # RTD Compensation Callback
@@ -1419,7 +1459,7 @@ class DashboardFrame(tk.Frame):
     def on_rtd_compensation_changed(self):
         """Handle RTD compensation checkbox toggle"""
         enabled = self.controller.apply_rtd_compensation.get()
-        logger.info(f"RTD Compensation checkbox toggled: {enabled}")
+        #logger.info(f"RTD Compensation checkbox toggled: {enabled}")
 
          # Send hardware command in background thread to avoid UI lag
         def send_command():
@@ -1430,8 +1470,8 @@ class DashboardFrame(tk.Frame):
                     cmd = b'RTD_ON\n' if enabled else b'RTD_OFF\n'
                     self.controller.port_manager.serial.write(cmd)
                     logger.info(f"RTD command sent to hardware: {cmd.decode().strip()}")
-            except Exception as e:
-                logger.error(f"Error sending RTD command: {e}")
+            except Exception as exc:
+                logger.error(f"Error sending RTD command: {exc}")
 
         # Run in background thread (no lag on UI)
         thread = threading.Thread(target=send_command, daemon=True)
@@ -1465,8 +1505,8 @@ class DashboardFrame(tk.Frame):
                 logger.info(f"Sent RTD command to hardware: {cmd.decode().strip()}")
             else:
                 logger.info("Serial port not available. Hardware command not sent, but software compensation will be applied based on checkbox state.")
-        except Exception as e:
-            logger.error(f"Error sending RTD command to hardware: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error(f"Error sending RTD command to hardware: {exc}", exc_info=True)
 
     def check_battery(self, battery_text):
         # expects strings like "3.50V" or "3.5"
@@ -1593,6 +1633,7 @@ class DashboardFrame(tk.Frame):
             success, msg = self.controller.port_manager.open_port(port_name)
             
             if success:
+                logger.info(f"Successfully connected to {port_name}")
                 # Update UI via main thread
                 self.controller.com_port_val.set(port_name)
                 self.controller.is_paired.set(True)
@@ -1623,13 +1664,13 @@ class DashboardFrame(tk.Frame):
                     if conn_window and hasattr(conn_window, "status_label"):
                         conn_window.status_label.config(text=f"✗ Failed: {msg}", fg="red")
                 self.after(0, update_error)
-        except Exception as e:
-            logger.error(f"Error opening port: {e}", exc_info=True)
+        except Exception as exc:
+            logger.error(f"Error opening port: {exc}", exc_info=True)
             self.controller.status_msg.set("Connection error")
             def update_exception():
                 conn_window = getattr(self, "connection_window", None)
                 if conn_window and hasattr(conn_window, "status_label"):
-                    conn_window.status_label.config(text=f"✗ Error: {str(e)}", fg="red")
+                    conn_window.status_label.config(text=f"✗ Error: {str(exc)}", fg="red")
             self.after(0, update_exception)
 
     def _close_port(self):
@@ -1640,6 +1681,7 @@ class DashboardFrame(tk.Frame):
         self.controller.packet_processor.reset()
         self.controller.serial = None
         self.controller.status_msg.set("Disconnected")
+        logger.info("Port closed")
         messagebox.showinfo("Disconnected", "Port closed")
         self.is_connected = False
 
@@ -1663,7 +1705,7 @@ class DashboardFrame(tk.Frame):
                 if packet:
                     self._process_data(packet)
         except Exception as e:
-            logger.error(f"Read error: {e}")
+            logger.warning(f"Read error: {e}")
         
         if self.controller.is_reading:
             self.after(20, self._read_data)
@@ -1744,8 +1786,8 @@ class DashboardFrame(tk.Frame):
                self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
            else:
                self.controller.raw_hex.set("--")
-        except Exception as e:
-           logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {e}", exc_info=True)
+        except Exception as exc:
+           logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {exc}", exc_info=True)
            return   # Exit only if parsing completely fails
         
         # ===============================
@@ -1773,7 +1815,7 @@ class DashboardFrame(tk.Frame):
                     conn.tx_combo["values"] = conn.tx_ids
                 except tk.TclError:
                     logger.warning("tx_combo widget no longer exists")
-                logger.info(f"Discovered new transmitter: {tx_id}")
+                #logger.info(f"Discovered new transmitter: {tx_id}")
 
               # Auto-select first TX
               if len(conn.tx_ids) == 1:
@@ -1801,8 +1843,8 @@ class DashboardFrame(tk.Frame):
                             self.controller.transmitter_id_val.set(tx_id)
                         except Exception:
                             pass
-        except Exception as e:
-           logger.error(f"Error in transmitter discovery: {e}", exc_info=True)
+        except Exception as exc:
+           logger.warning(f"Error in transmitter discovery: {exc}", exc_info=True)
         
         # ===============================
 # TRANSMITTER SELECTION FILTERING
@@ -1826,7 +1868,7 @@ class DashboardFrame(tk.Frame):
             return
         
         # If no transmitter is selected yet, show the data anyway (useful during discovery)
-        logger.info(f"Processing packet from TX: {tx_id} (selected: {selected_tx})")
+        #logger.info(f"Processing packet from TX: {tx_id} (selected: {selected_tx})")
         
         # -------- DEVICE TEMPERATURE --------
         device_temp = getattr(data, "temperature", None)
@@ -1886,7 +1928,8 @@ class DashboardFrame(tk.Frame):
             thermo_int = (thermo_int << 8) | pkt[12]
 
             batt_int = (pkt[15] << 8) | pkt[14]
-
+            
+        
 # WITH THIS:
             station_name = self.controller.station_name.get() or "UNKNOWN"
             rssi_val = getattr(data, "rssi", 0) or 0
@@ -1897,7 +1940,10 @@ class DashboardFrame(tk.Frame):
 
             self.controller.log_to_db(station_name,dev_id,temp_int,
             rtd_int,thermo_int,batt_int,rssi_int
-          )
+        )
+            # Send packet to serial port
+            logger.debug(f"[DASHBOARD] Writing packet to output port: {pkt}")
+            self.controller.port_manager.write_byte(bytes(pkt))
 
             ts = datetime.now().strftime("%H:%M:%S")
             # history display still uses simplified string
@@ -1909,7 +1955,7 @@ class DashboardFrame(tk.Frame):
                     self.controller.frames["DashboardFrame"].update_graph()
                 except Exception:
                     pass
-        # -------------------------------
+                
 # 
 # Valid thermocouple temperature
         elif tc is not None:
@@ -1956,6 +2002,8 @@ class DashboardFrame(tk.Frame):
         else:
             if self.controller.rssi_val.get() == "":
                 self.controller.rssi_val.set("--")
+
+        
     
     def _check_alerts(self, data):
         """Check sensor data for alert conditions"""
@@ -1980,11 +2028,12 @@ class DashboardFrame(tk.Frame):
                 self.active_alerts["RTD"].append(("RTD under lower limit. May be short circuit", "red"))
                 rtd_status = " Short Circuit"
                 rtd_color = "#d40000"
+                logger.warning(f"RTD SHORT CIRCUIT: {rtd_resistance}Ω")
             elif rtd_resistance > 390:
                 self.active_alerts["RTD"].append(("RTD over upper limit. May be RTD is melt and open", "red"))
                 rtd_status = "Open Circuit"
                 rtd_color = "#d40000"
-        
+                logger.warning(f"RTD OPEN CIRCUIT: {rtd_resistance}Ω")
         # Update RTD alert box
         try:
             self.rtd_alert_label.config(text=rtd_status, fg=rtd_color)
@@ -2007,10 +2056,12 @@ class DashboardFrame(tk.Frame):
                 self.active_alerts["THERMOCOUPLE"].append(("Thermo couple temperature is under lower limit. May be short", "red"))
                 tc_status = " Short Circuit"
                 tc_color = "#d40000"
+                logger.warning(f"THERMOCOUPLE SHORT: {tc_voltage_uv}µV")
             elif tc_voltage_uv > 14000:
                 self.active_alerts["THERMOCOUPLE"].append(("Thermocouple is not connected or short", "red"))
                 tc_status = " Not Connected"
                 tc_color = "#d40000"
+                logger.warning(f"THERMOCOUPLE NOT CONNECTED: {tc_voltage_uv}µV")
             elif 100 <= tc_voltage_uv <= 1800:
                 tc_status = " Connected"
                 tc_color = "#ff9900"
@@ -2037,11 +2088,12 @@ class DashboardFrame(tk.Frame):
                 self.active_alerts["BATTERY"].append(("Battery critically low - Charge immediately!", "red"))
                 battery_status = " Critical"
                 battery_color = "#d40000"
+                logger.error(f"BATTERY CRITICAL: {battery_voltage}V")
             elif battery_voltage < 3.6:
                 self.active_alerts["BATTERY"].append(("Battery low - Recharge soon", "yellow"))
                 battery_status = " Low"
                 battery_color =  "#d40000"
-        
+                logger.warning(f"BATTERY LOW: {battery_voltage}V")
         # Update Battery alert box
         try:
             self.battery_alert_label.config(text=battery_status, fg=battery_color)
@@ -2098,11 +2150,11 @@ class DashboardFrame(tk.Frame):
                 dashboard=self,
                 is_connected=self.is_connected
             )
-        except Exception as e:
+        except Exception as exc:
             logger.exception("Failed to open ConnectionSettings")
             messagebox.showerror(
                 "Error",
-                f"Unable to open connection settings:\n{e}"
+                f"Unable to open connection settings:\n{exc}"
             )
 
 class ConnectionSettings(tk.Toplevel):
@@ -2110,6 +2162,7 @@ class ConnectionSettings(tk.Toplevel):
 
     def __init__(self, controller, dashboard, is_connected=False):
         super().__init__(dashboard)
+        logger.info("Opening ConnectionSettings window")
 
         self.controller = controller
         self.dashboard = dashboard
@@ -2211,17 +2264,6 @@ class ConnectionSettings(tk.Toplevel):
         logger.info("Connection Settings window closed")
         self.destroy()
 
-    """def update_ports(self):
-        ports = self.controller.port_manager.get_available_ports()
-        self.combo["values"] = ports if ports else []
-        if ports:
-            try:
-                self.combo.current(0)
-            except Exception:
-                pass"""
-   
-    # In ConnectionSettings class, REPLACE the update_ports() method with:
-
     def update_ports(self):
         """Update available ports - show ALL ports including the currently connected one.
     
@@ -2243,7 +2285,7 @@ class ConnectionSettings(tk.Toplevel):
                index = ports.index(connected_port) if ports else -1
                if index >= 0:
                   self.combo.current(index)
-                  logger.info(f"Connection Settings: Currently connected to {connected_port}")
+                  #logger.info(f"Connection Settings: Currently connected to {connected_port}")
                else:
                 # Connected port not in list, select first available
                   if ports:
@@ -2262,7 +2304,7 @@ class ConnectionSettings(tk.Toplevel):
                except Exception:
                 pass
     
-        logger.info(f"Connection Settings: Showing {len(ports)} available ports (including connected)")
+        #logger.info(f"Connection Settings: Showing {len(ports)} available ports (including connected)")
 
     def ask_password(self):
         """Prompt for password; enable controls only if correct."""
@@ -2273,6 +2315,7 @@ class ConnectionSettings(tk.Toplevel):
             # user cancelled — keep controls disabled
             self.status_label.config(text="Locked — password required", fg="black")
         else:
+            logger.warning("Incorrect password entered")
             messagebox.showerror("Access Denied", "Wrong Password", parent=self)
             self.status_label.config(text="Wrong password — controls locked", fg="red")
 
@@ -2313,8 +2356,10 @@ class ConnectionSettings(tk.Toplevel):
             logger.info("✓ Restored: CONNECT enabled, DISCONNECT disabled")
 
     def connect(self):
+       logger.info("Connect button clicked")
        port = self.combo.get()
        if not port:
+          logger.warning("No port selected for connection")
           messagebox.showerror("Error", "Select a COM port", parent=self)
           return
 
@@ -2323,6 +2368,7 @@ class ConnectionSettings(tk.Toplevel):
        self.btn_disconnect.config(state="normal")
        self.dashboard.combo = self.combo
     
+       logger.info(f"Connecting to {port}")
     # ✅ ADD THIS LINE - Set the port immediately
        self.controller.com_port_val.set(port)
     
@@ -2335,7 +2381,7 @@ class ConnectionSettings(tk.Toplevel):
        self.dashboard.is_connected = True
     
        self.status_label.config(text=f"✓ Connected to {port}", fg="green")
-       logger.info(f"[CONNECT] Button state SAVED: connected")
+       #logger.info(f"[CONNECT] Button state SAVED: connected")
     
 
 
@@ -2383,6 +2429,7 @@ class SettingsFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg="#f0f0f0")
         self.controller = controller
+        logger.info("Initializing SettingsFrame")
         
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=60)
@@ -2521,14 +2568,14 @@ class SettingsFrame(tk.Frame):
         port_row = tk.Frame(port_frame, bg="#f0f0f0")
         port_row.pack(fill="x", pady=8)
 
-        tk.Label(port_row, text="Select Output Port:", width=20, anchor="w", bg="#f0f0f0", 
-          font=("Arial", 11)).pack(side="left", padx=5)
+        tk.Label(port_row, text="Select Output Port:", width=18, anchor="w", bg="#f0f0f0", 
+          font=("Arial", 11)).pack(side="left", padx=10)
 
-        self.output_port_combo = ttk.Combobox(port_row, width=30, state="readonly", font=("Arial", 10))
-        self.output_port_combo.pack(side="left", padx=10, fill="x", expand=True)
+        self.output_port_combo = ttk.Combobox(port_row, width=12, state="readonly", font=("Arial", 10))
+        self.output_port_combo.pack(side="left", padx=10)
 
 # Refresh Ports Button
-        tk.Button(port_row, text="🔄 Refresh Ports", bg="#2196F3", fg="white", 
+        tk.Button(port_row, text="🔄 Refresh", bg="#2196F3", fg="white", 
            font=("Arial", 10, "bold"), width=15,
            command=lambda: self.refresh_output_ports()).pack(side="left", padx=5)
 
@@ -2536,12 +2583,12 @@ class SettingsFrame(tk.Frame):
         baud_row = tk.Frame(port_frame, bg="#f0f0f0")
         baud_row.pack(fill="x", pady=8)
 
-        tk.Label(baud_row, text="Baud Rate:", width=20, anchor="w", bg="#f0f0f0", 
+        tk.Label(baud_row, text="Baud Rate:", width=18, anchor="w", bg="#f0f0f0", 
           font=("Arial", 11)).pack(side="left", padx=5)
 
         self.output_baud_combo = ttk.Combobox(baud_row, 
                                       values=["9600", "19200", "38400", "57600", "115200"],
-                                      state="readonly", width=20, font=("Arial", 10))
+                                      state="readonly", width=12, font=("Arial", 10))
         self.output_baud_combo.pack(side="left", padx=10)
         self.output_baud_combo.set("115200")  # Default value
 
@@ -2686,8 +2733,8 @@ class SettingsFrame(tk.Frame):
                     cmd = b'RTD_ON\n' if enabled else b'RTD_OFF\n'
                     self.controller.port_manager.serial.write(cmd)
                     logger.info(f"RTD command sent to hardware: {cmd.decode().strip()}")
-            except Exception as e:
-                logger.error(f"Error sending RTD command: {e}")
+            except Exception  as exc:
+                logger.error(f"Error sending RTD command: {exc}")
 
         # Run in background thread (no lag on UI)
         thread = threading.Thread(target=send_command, daemon=True)
@@ -2729,7 +2776,7 @@ class SettingsFrame(tk.Frame):
         # Extract device name (e.g., "COM8" from "COM8 - USB Serial Port")
           connected_device = connected_port.split(" - ")[0].strip()
           filtered_ports = [p for p in all_ports if not p.startswith(connected_device)]
-          logger.info(f"Excluded connected port: {connected_device}")
+          #logger.info(f"Excluded connected port: {connected_device}")
        else:
         # No port connected, show all ports
           filtered_ports = all_ports
@@ -2759,14 +2806,14 @@ class SettingsFrame(tk.Frame):
                success, msg = self.controller.port_manager.open_output_port(port_str, int(baud))
                if success:
                   messagebox.showinfo("Success", msg)
-                  logger.info(msg)
+                  #logger.info(msg)
                else:
                    messagebox.showerror("Error", msg)
            else:
               success, msg = self.controller.port_manager.close_output_port()
               if success:
                 messagebox.showinfo("Success", msg)
-                logger.info(msg)
+                #logger.info(msg)
               else:
                 messagebox.showerror("Error", msg)
        except Exception as e:
