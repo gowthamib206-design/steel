@@ -393,6 +393,12 @@ class SerialPortManager:
          self.serial = None          # ✅ ADD THIS LINE
          self.is_open = False
          self.current_port = None 
+         self.input_serial = None
+         self.input_is_open = False
+         self.input_port = None
+         self.output_serial = None
+         self.output_is_open = False
+         self.output_port = None
     
     def get_available_ports(self, exclude_connected=False) -> List[str]:
        """Get list of available serial ports
@@ -421,46 +427,56 @@ class SerialPortManager:
           return []
        
     def open_port(self, port_str: str, baudrate: int = 115200) -> Tuple[bool, str]:
-        """Open serial port"""
+        """Open INPUT serial port (main port for sensor data)"""
         if not port_str:
-          error_msg = "Port string is empty"
-          logger.error(error_msg)
-          return False, error_msg
-    
-        try:
-          parts = port_str.split(" - ")
-          port = parts[0].strip() if parts else None
-        
-          if not port:
-            error_msg = "Invalid port format"
+            error_msg = "Port string is empty"
             logger.error(error_msg)
             return False, error_msg
         
-          self.serial = serial.Serial(port, baudrate, timeout=1)
-          self.is_open = True
-        # Store FULL port string with description for proper exclusion later
-          self.current_port = port_str  # Changed: store the full string like "COM3 - USB Serial Port"
-          success_msg = f"Successfully opened {port}"
-          logger.info(success_msg)
-          return True, success_msg
-    
+        try:
+            parts = port_str.split(" - ")
+            port = parts[0].strip() if parts else None
+            
+            if not port:
+                error_msg = "Invalid port format"
+                logger.error(error_msg)
+                return False, error_msg
+            
+            # Close existing connection first
+            if self.serial and self.serial.is_open:
+                self.serial.close()
+            
+            self.serial = serial.Serial(port, baudrate, timeout=1)
+            self.input_serial = self.serial  # Also set input_serial for backward compatibility
+            self.is_open = True
+            self.input_is_open = True
+            self.current_port = port_str
+            self.input_port = port_str
+            
+            success_msg = f"Successfully opened {port}"
+            logger.info(success_msg)
+            return True, success_msg
+        
         except serial.SerialException as e:
-          error_msg = f"Serial error: {e}"
-          logger.error(error_msg)
-          return False, error_msg
+            error_msg = f"Serial error: {e}"
+            logger.error(error_msg)
+            return False, error_msg
         except Exception as e:
-           error_msg = f"Unexpected error opening port: {e}"
-           logger.error(error_msg)
-           return False, error_msg
+            error_msg = f"Unexpected error opening port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
     
     def close_port(self) -> Tuple[bool, str]:
-        """Close serial port"""
+        """Close INPUT serial port"""
         try:
             if self.serial and self.serial.is_open:
                 self.serial.close()
                 self.serial = None
+                self.input_serial = None
                 self.is_open = False
-                self.current_port = None  # Clear the tracked port
+                self.input_is_open = False
+                self.current_port = None
+                self.input_port = None
                 return True, "Port closed successfully"
             else:
                 error_msg = "Port is not open"
@@ -470,10 +486,9 @@ class SerialPortManager:
             error_msg = f"Error closing port: {e}"
             logger.error(error_msg)
             return False, error_msg
-      
     
     def read_byte(self) -> Optional[bytes]:
-        """Read single byte from serial port"""
+        """Read single byte from INPUT port"""
         try:
             if self.serial and self.is_open:
                 data = self.serial.read(1)
@@ -485,7 +500,95 @@ class SerialPortManager:
             return None
         except Exception as e:
             logger.error(f"Unexpected error reading data: {e}")
-            return None
+            return None   
+    
+    
+    # ============================================================
+   
+    # ============================================================
+    
+    def open_output_port(self, port_str: str, baudrate: int = 115200) -> Tuple[bool, str]:
+        """Open output serial port for transmitting data to external devices"""
+        if not port_str:
+            error_msg = "Output port string is empty"
+            logger.error(error_msg)
+            return False, error_msg
+            
+        try:
+            parts = port_str.split(" - ")
+            port = parts[0].strip() if parts else None
+            
+            if not port:
+                error_msg = "Invalid output port format"
+                logger.error(error_msg)
+                return False, error_msg
+            
+            # Prevent opening the same port for both input and output
+            input_device = self.input_port.split(" - ")[0].strip() if self.input_port else None
+            if input_device and port == input_device:
+                error_msg = "Cannot use the same port for both INPUT and OUTPUT"
+                logger.error(error_msg)
+                return False, error_msg
+            
+            # Close existing output port first
+            if self.output_serial and self.output_serial.is_open:
+                self.output_serial.close()
+            
+            self.output_serial = serial.Serial(port, baudrate, timeout=1)
+            self.output_is_open = True
+            self.output_port = port_str
+            
+            success_msg = f"Successfully opened OUTPUT port {port} @ {baudrate} baud"
+            logger.info(success_msg)
+            return True, success_msg
+        
+        except serial.SerialException as e:
+            error_msg = f"Serial error on OUTPUT port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error opening OUTPUT port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def close_output_port(self) -> Tuple[bool, str]:
+        """Close output serial port"""
+        try:
+            if self.output_serial and self.output_serial.is_open:
+                self.output_serial.close()
+                self.output_serial = None
+                self.output_is_open = False
+                self.output_port = None
+                return True, "Output port closed successfully"
+            else:
+                error_msg = "Output port is not open"
+                logger.warning(error_msg)
+                return False, error_msg
+        except Exception as e:
+            error_msg = f"Error closing output port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def write_byte(self, data: bytes) -> Tuple[bool, str]:
+        """Write data to OUTPUT port"""
+        try:
+            if self.output_serial and self.output_is_open:
+                bytes_written = self.output_serial.write(data)
+                self.output_serial.flush()
+                logger.debug(f"Wrote {bytes_written} bytes to OUTPUT port")
+                return True, f"Successfully wrote {bytes_written} bytes"
+            else:
+                error_msg = "Output port is not open"
+                logger.warning(error_msg)
+                return False, error_msg
+        except serial.SerialException as e:
+            error_msg = f"Serial write error on OUTPUT port: {e}"
+            logger.error(error_msg)
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error writing to OUTPUT port: {e}"
+            logger.error(error_msg)
+            return False, error_msg 
 
 
 class PacketProcessor:
@@ -958,7 +1061,7 @@ class SensorGUI(tk.Tk):
         self.port_manager = SerialPortManager()
         self.packet_processor = PacketProcessor()
         self.data_parser = SensorDataParser()
-
+        self.output_port_serial = None   
 
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
@@ -2405,38 +2508,53 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["Outputs"] = tk.Frame(self.content_container, bg="#f0f0f0")
         outputs_content = tk.Frame(self.tab_frames["Outputs"], bg="#f0f0f0")
         outputs_content.pack(fill="both", expand=True, padx=30, pady=30)
-        
-        tk.Label(outputs_content, text="Output Configuration", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        
-        # COM Port Settings
-        com_frame = tk.LabelFrame(outputs_content, text="COM Port Settings", bg="#f0f0f0", 
-                                 font=("Arial", 12, "bold"), padx=15, pady=15)
-        com_frame.pack(fill="x", pady=10)
-        """self.create_combobox_row(com_frame, "Port:", controller.com_port, ["COM1", "COM2", "COM3", "USB-SERIAL"])"""
-        
-        # ✅ ADD THIS SECTION (Port dropdown with REFRESH button)
-        port_select_frame = tk.Frame(com_frame, bg="#f0f0f0")
-        port_select_frame.pack(fill="x", pady=8)
 
-        tk.Label(port_select_frame, text="Port:", width=20, anchor="e", bg="#f0f0f0", 
-         font=("Arial", 12, "bold")).pack(side="left")
+        tk.Label(outputs_content, text="Output Port Configuration", fg="#333333", bg="#f0f0f0", 
+          font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
 
-        self.output_port_combo = ttk.Combobox(port_select_frame, width=25, state="readonly")
-        self.output_port_combo.pack(side="left", padx=15)
+       # ===== OUTPUT PORT SELECTION FRAME =====
+        port_frame = tk.LabelFrame(outputs_content, text="COM Port Settings", bg="#f0f0f0", 
+                          font=("Arial", 12, "bold"), padx=15, pady=15)
+        port_frame.pack(fill="x", pady=10)
 
-# Refresh button to update available ports
-        tk.Button(port_select_frame, text="🔄 REFRESH", bg="#cccccc", fg="black", 
-         font=("Arial", 10, "bold"), width=12, 
-         command=self.refresh_output_ports).pack(side="left", padx=5)
+        # Port Selection Row
+        port_row = tk.Frame(port_frame, bg="#f0f0f0")
+        port_row.pack(fill="x", pady=8)
 
-# Populate ports on tab initialization
-        self.refresh_output_ports()
-        self.controller.com_port_val.trace_add('write', lambda *args: self.on_port_changed())
+        tk.Label(port_row, text="Select Output Port:", width=20, anchor="w", bg="#f0f0f0", 
+          font=("Arial", 11)).pack(side="left", padx=5)
 
-# Original baud rate row
-        self.create_combobox_row(com_frame, "Baud Rate:", controller.baud_rate, ["9600", "19200", "38400", "115200"])
-        
+        self.output_port_combo = ttk.Combobox(port_row, width=30, state="readonly", font=("Arial", 10))
+        self.output_port_combo.pack(side="left", padx=10, fill="x", expand=True)
+
+# Refresh Ports Button
+        tk.Button(port_row, text="🔄 Refresh Ports", bg="#2196F3", fg="white", 
+           font=("Arial", 10, "bold"), width=15,
+           command=lambda: self.refresh_output_ports()).pack(side="left", padx=5)
+
+# Baud Rate Selection Row
+        baud_row = tk.Frame(port_frame, bg="#f0f0f0")
+        baud_row.pack(fill="x", pady=8)
+
+        tk.Label(baud_row, text="Baud Rate:", width=20, anchor="w", bg="#f0f0f0", 
+          font=("Arial", 11)).pack(side="left", padx=5)
+
+        self.output_baud_combo = ttk.Combobox(baud_row, 
+                                      values=["9600", "19200", "38400", "57600", "115200"],
+                                      state="readonly", width=20, font=("Arial", 10))
+        self.output_baud_combo.pack(side="left", padx=10)
+        self.output_baud_combo.set("115200")  # Default value
+
+# ===== CONTROL BUTTONS =====
+        button_frame = tk.Frame(outputs_content, bg="#f0f0f0")
+        button_frame.pack(fill="x", pady=20)
+
+        self.output_enable_btn = tk.Button(button_frame, text="✓ ENABLE OUTPUT PORT", 
+                                   bg="#4caf50", fg="white", 
+                                   font=("Arial", 12, "bold"), width=25, height=2,
+                                   command=self.enable_output_port)
+        self.output_enable_btn.pack(side="left", padx=10)
+
         self.out_notebook = ttk.Notebook(outputs_content)
         self.out_notebook.pack(fill="both", expand=True, padx=0, pady=10)
         
@@ -2553,6 +2671,7 @@ class SettingsFrame(tk.Frame):
         
         tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
                   padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)
+        
     def on_rtd_compensation_changed(self):
         """Handle RTD compensation checkbox toggle - send command in background thread (no lag)"""
         enabled = self.controller.apply_rtd_compensation.get()
@@ -2573,6 +2692,7 @@ class SettingsFrame(tk.Frame):
         # Run in background thread (no lag on UI)
         thread = threading.Thread(target=send_command, daemon=True)
         thread.start()
+
     def show_tab(self, tab_name):
         """Show selected tab and update button colors"""
         # Hide all tabs
@@ -2625,6 +2745,34 @@ class SettingsFrame(tk.Frame):
              pass
     
        logger.info(f"Output ports refreshed: {len(filtered_ports)} available (connected: {connected_port})")
+    def enable_output_port(self):
+       """Enable/toggle output port connection"""
+       try:
+           if not self.controller.port_manager.output_is_open:
+               port_str = self.output_port_combo.get()
+               if not port_str:
+                  messagebox.showerror("Error", "Select an output port")
+                  return
+            
+               baud = self.output_baud_combo.get() or "115200"
+            
+               success, msg = self.controller.port_manager.open_output_port(port_str, int(baud))
+               if success:
+                  messagebox.showinfo("Success", msg)
+                  logger.info(msg)
+               else:
+                   messagebox.showerror("Error", msg)
+           else:
+              success, msg = self.controller.port_manager.close_output_port()
+              if success:
+                messagebox.showinfo("Success", msg)
+                logger.info(msg)
+              else:
+                messagebox.showerror("Error", msg)
+       except Exception as e:
+        logger.error(f"Error toggling output port: {e}", exc_info=True)
+        messagebox.showerror("Error", f"Failed to toggle output port:\n{e}")
+    
 
     # ============================================
 # ADD THIS NEW METHOD after refresh_output_ports()
@@ -2800,6 +2948,7 @@ class SettingsFrame(tk.Frame):
 
         except Exception as e:
             messagebox.showerror("Export Error", str(e))
+            logger.error(f"Output write error: {e}")
 
     def save_and_exit(self):
         # apply updated graph buffer size based on time scale
