@@ -1040,6 +1040,8 @@ class SensorGUI(tk.Tk):
         self.signal_strength = tk.StringVar()
         self.firmware_version = tk.StringVar()
         self.apply_rtd_compensation = tk.BooleanVar(value=False)
+        #self.transmitter_id_val = tk.StringVar(value="WAITING")
+        #self.history_enabled = tk.BooleanVar(value=True)
         
         # --- Database & logging setup ---
         self.init_db()
@@ -2431,6 +2433,19 @@ class SettingsFrame(tk.Frame):
         self.controller = controller
         logger.info("Initializing SettingsFrame")
         
+        # -------- Temporary variables for settings --------
+        self.temp_station_name = tk.StringVar(value=controller.station_name.get())
+        self.temp_view_mode = tk.StringVar(value=controller.view_mode.get())
+        self.temp_time_scale = tk.StringVar(value=controller.time_scale_str.get())
+        self.temp_y_min = tk.StringVar(value=controller.y_min.get())
+        self.temp_y_max = tk.StringVar(value=controller.y_max.get())
+        self.temp_units = tk.StringVar(value=controller.units.get())
+        #self.temp_transmitter_id = tk.StringVar(value=controller.transmitter_id_val.get())
+        #self.temp_history_enabled = tk.BooleanVar(value=True)
+
+
+        self.temp_rtd_enable = tk.BooleanVar(value=controller.apply_rtd_compensation.get())
+
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=60)
         header.pack(fill="x", padx=0, pady=0)
@@ -2494,9 +2509,9 @@ class SettingsFrame(tk.Frame):
         
         tk.Label(gen_content, text="General Settings", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        self.create_entry_row(gen_content, "Station Name:", controller.station_name)
+        self.create_entry_row(gen_content, "Station Name:", self.temp_station_name)
         self.create_static_row(gen_content, "Sensor Type:", "Type B")
-        self.create_combobox_row(gen_content, "Dashboard View:", controller.view_mode, ["Digital View", "Graph View"])
+        self.create_combobox_row(gen_content, "Dashboard View:",self.temp_view_mode,  ["Digital View", "Graph View"])
         #w
         # self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
         tk.Frame(gen_content, bg="#f0f0f0").pack(fill="both", expand=True)
@@ -2515,12 +2530,12 @@ class SettingsFrame(tk.Frame):
         graph_content = tk.Frame(self.tab_frames["Graph"], bg="#f0f0f0")
         graph_content.pack(fill="both", expand=True, padx=30, pady=30)
         
-        tk.Label(graph_content, text="Graph Display Settings", fg="#333333", bg="#f0f0f0", 
+        tk.Label(graph_content, text="Graph  Settings", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         tk.Label(graph_content, text="Configure time scales and axis modes for live graph display", 
                 font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
         # interactive controls
-        self.create_combobox_row(graph_content, "Time Scale:", controller.time_scale_str, ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
+        self.create_combobox_row(graph_content, "Time Scale:",self.temp_time_scale,  ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
         tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="nw",pady=(10,0))
 
         # Temperature Range (Min - Max)
@@ -2533,11 +2548,11 @@ class SettingsFrame(tk.Frame):
         range_input_frame.pack(side="left", padx=15)
 
         tk.Label(range_input_frame, text="Min (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
-        min_entry = tk.Entry(range_input_frame, textvariable=controller.y_min, width=10, font=("Arial", 11))
+        min_entry = tk.Entry(range_input_frame, textvariable=self.temp_y_min, width=10, font=("Arial", 11))
         min_entry.pack(side="left", padx=5)
  
         tk.Label(range_input_frame, text="Max (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
-        max_entry = tk.Entry(range_input_frame, textvariable=controller.y_max, width=10, font=("Arial", 11))
+        max_entry = tk.Entry(range_input_frame, textvariable=self.temp_y_max, width=10, font=("Arial", 11))
         max_entry.pack(side="left", padx=5)
 
         """tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
@@ -2715,17 +2730,7 @@ class SettingsFrame(tk.Frame):
         self.create_diag_row(port_diag_frame, "Connection Status:", controller.status_msg)
         self.create_diag_row(port_diag_frame, "Transmitter ID:", controller.transmitter_id_val)
         
-          
-    # Add spacer to push button to bottom
-        tk.Frame(debug_content, bg="#f0f0f0").pack(fill="both", expand=True)
-    
-    # Save button for Troubleshooting tab
-        debug_btn_frame = tk.Frame(debug_content, bg="#f0f0f0")
-        debug_btn_frame.pack(fill="x", pady=20)
-        tk.Button(debug_btn_frame, text="✔ SAVE DIAGNOSTICS SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("Troubleshooting")).pack(pady=10)
-
+      
         # ========== TAB 6: HISTORY ==========
         self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
         self.tab_frames["History"].grid(row=0, column=0, sticky="nsew")
@@ -2763,13 +2768,6 @@ class SettingsFrame(tk.Frame):
         self.history_list.pack(fill="both", expand=True, pady=10)"""
         tk.Frame(hist_content, bg="#f0f0f0").pack(fill="both", expand=True)
     
-    # Save button for History tab
-        hist_btn_frame = tk.Frame(hist_content, bg="#f0f0f0")
-        hist_btn_frame.pack(fill="x", pady=20)
-        tk.Button(hist_btn_frame, text="✔ SAVE HISTORY SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("History")).pack(pady=10)
-
         # ========== TAB: RTD COMPENSATION ==========
         self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
         self.tab_frames["RTD Compensation"].grid(row=0, column=0, sticky="nsew")
@@ -2791,7 +2789,7 @@ class SettingsFrame(tk.Frame):
          bg="#f0f0f0",font=("Arial", 12, "bold")).pack(side="left")
 
         tk.Checkbutton(rtd_frame,text="Enable",
-            variable=controller.apply_rtd_compensation, command=self.on_rtd_compensation_changed,
+            variable=self.temp_rtd_enable, command=self.on_rtd_compensation_changed,
                bg="#f0f0f0",font=("Arial", 11)).pack(side="left", padx=15)
         
         # Add spacer to push button to bottom
@@ -2816,9 +2814,11 @@ class SettingsFrame(tk.Frame):
            
            current_tab = tab_name
            if tab_name == "General":
-              self.save_general_settings()
+              
+                self.save_general_settings()
            elif tab_name == "Graph":
              self.save_graph_settings()
+            
            elif tab_name == "Transmitter":
               self.save_transmitter_settings()
            elif tab_name == "Outputs":
@@ -2827,9 +2827,9 @@ class SettingsFrame(tk.Frame):
               self.save_troubleshooting_settings()
            elif tab_name == "History":
              self.save_history_settings()
-           elif tab_name == "RTD Compensation":
+           elif tab_name == "RTD Compensation":    
             self.save_rtd_settings()
-        
+           
         # Show success message
            """ messagebox.showinfo(
               f"✔ {tab_name} Settings Saved",
@@ -2852,16 +2852,22 @@ class SettingsFrame(tk.Frame):
         logger.info("Exit settings pressed")
         self.controller.show_frame("MainFrame")
 
-    def save_general_settings(self):
-        """Save General tab settings"""
+    """def save_general_settings(self):
+        
         station_name = self.controller.station_name.get()
         view_mode = self.controller.view_mode.get()
        
-        logger.info(f"Saving General Settings: Station={station_name}, View={view_mode}")
+        logger.info(f"Saving General Settings: Station={station_name}, View={view_mode}")"""
     # Any additional validation or file write can go here
+    def save_general_settings(self):
+       
+       self.controller.station_name.set(self.temp_station_name.get())
+       self.controller.view_mode.set(self.temp_view_mode.get())
 
-    def save_graph_settings(self):
-       """Save Graph tab settings"""
+       print("General settings saved")
+    
+    """def save_graph_settings(self):
+       
        time_scale = self.controller.time_scale_str.get()
        y_min = self.controller.y_min.get()
        y_max = self.controller.y_max.get()
@@ -2875,12 +2881,24 @@ class SettingsFrame(tk.Frame):
            raise ValueError(f"Invalid temperature range: {e}")
     
        self.controller.update_buffer_size()
-       logger.info(f"Saving Graph Settings: Scale={time_scale}, Range={y_min}-{y_max}°C")
+       logger.info(f"Saving Graph Settings: Scale={time_scale}, Range={y_min}-{y_max}°C")"""
+    
+    def save_graph_settings(self):
+
+       self.controller.time_scale_str.set(self.temp_time_scale.get())
+       self.controller.y_min.set(self.temp_y_min.get())
+       self.controller.y_max.set(self.temp_y_max.get())
+
+       self.controller.update_buffer_size()
+
+       print("Graph settings saved")
 
     def save_transmitter_settings(self):
         """Save Transmitter tab settings"""
-        transmitter_id = self.controller.transmitter_id_val.get()
-        logger.info(f"Saving Transmitter Settings: ID={transmitter_id}")
+        self.controller.transmitter_id_val.set(self.temp_transmitter_id.get())
+
+        #transmitter_id = self.temp.transmitter_id_val.get()
+        #logger.info(f"Saving Transmitter Settings: ID={transmitter_id}")
 
     def save_output_settings(self):
         """Save Output tab settings"""
@@ -2895,16 +2913,25 @@ class SettingsFrame(tk.Frame):
 
     def save_history_settings(self):
         """Save History tab settings"""
+       
+        self.save_history_settings
+        messagebox.showinfo("Success", "History settings saved!")
+
+
         date_from = self.date_from_var.get()
         date_to = self.date_to_var.get()
         logger.info(f"Saving History Settings: From={date_from}, To={date_to}")
 
-    def save_rtd_settings(self):
-        """Save RTD Compensation settings"""
+    """def save_rtd_settings(self):
+        
         rtd_enabled = self.controller.apply_rtd_compensation.get()
         logger.info(f"Saving RTD Compensation: Enabled={rtd_enabled}")
-        self.on_rtd_compensation_changed()
+        self.on_rtd_compensation_changed()"""
+    def save_rtd_settings(self):
 
+        self.controller.apply_rtd_compensation.set(self.temp_rtd_enable.get())
+
+        print("RTD settings saved")
         # ========== FOOTER BUTTONS ==========
         footer_frame = tk.Frame(self, bg="#f0f0f0", height=60)
         footer_frame.pack(fill="x", side="bottom", padx=0, pady=0)
@@ -2913,14 +2940,14 @@ class SettingsFrame(tk.Frame):
         """tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
                   padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)"""
         
-        bottom_frame = tk.Frame(self, bg="#d9d9d9", height=50)
+        """bottom_frame = tk.Frame(self, bg="#d9d9d9", height=50)
         bottom_frame.pack(side="bottom", fill="x")
 
         back_btn = tk.Button(bottom_frame,text="← BACK TO DASHBOARD",bg="#3c3f41",fg="white",
         font=("Arial", 11, "bold"),padx=20,pady=5,command=lambda: self.controller.show_frame("DashboardFrame")
          ,activebackground="#000000", activeforeground="#ffffff")
 
-        back_btn.pack(side="right", padx=20, pady=8)
+        back_btn.pack(side="right", padx=20, pady=8)"""
 
     def on_rtd_compensation_changed(self):
         """Handle RTD compensation checkbox toggle - send command in background thread (no lag)"""
