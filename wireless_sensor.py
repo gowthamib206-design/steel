@@ -2439,9 +2439,9 @@ class SettingsFrame(tk.Frame):
         tk.Label(header, text="CONFIGURATION - WIRELESS SENSOR SYSTEM", fg="#333333", bg="#e6e6e6", 
                 font=("Arial", 18, "bold")).pack(side="left", padx=30, pady=15)
         
-        tk.Button(header, text="← BACK TO DASHBOARD", bg="#cccccc", fg="black", font=("Arial", 10, "bold"),
+        """tk.Button(header, text="← BACK TO DASHBOARD", bg="#cccccc", fg="black", font=("Arial", 10, "bold"),
                  command=lambda: controller.show_frame("DashboardFrame"), 
-                 activebackground="#000000", activeforeground="#ffffff").pack(side="right", padx=20, pady=12)
+                 activebackground="#000000", activeforeground="#ffffff").pack(side="right", padx=20, pady=12)"""
         
           # ========== TAB NAVIGATION (HORIZONTAL) ==========
         tab_nav = tk.Frame(self, bg="#d0d0d0", height=50)
@@ -2466,6 +2466,15 @@ class SettingsFrame(tk.Frame):
             )
             btn.pack(side="left", padx=2, pady=5)
             self.tab_buttons[tab_name] = btn
+        # ===== Bottom Navigation Bar =====
+        bottom_frame = tk.Frame(self, bg="#d9d9d9", height=50)
+        bottom_frame.pack(side="bottom", fill="x")
+
+        back_btn = tk.Button(bottom_frame,text="← BACK TO DASHBOARD",bg="#3c3f41",fg="white",
+        font=("Arial", 11, "bold"),padx=20,pady=5,command=lambda: self.controller.show_frame("DashboardFrame")
+        )
+
+        back_btn.pack(side="right", padx=20, pady=8)
         
         # ========== CONTENT AREA ==========
         self.content_container = tk.Frame(self, bg="#f0f0f0")
@@ -2476,6 +2485,10 @@ class SettingsFrame(tk.Frame):
         # ========== TAB 1: GENERAL ==========
         self.tab_frames["General"] = tk.Frame(self.content_container, bg="#f0f0f0")
         self.tab_frames["General"].grid(row=0, column=0, sticky="nsew")
+
+        self.tab_frames["General"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["General"].grid_columnconfigure(0, weight=1)
+    
         gen_content = tk.Frame(self.tab_frames["General"], bg="#f0f0f0")
         gen_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -2486,9 +2499,19 @@ class SettingsFrame(tk.Frame):
         self.create_combobox_row(gen_content, "Dashboard View:", controller.view_mode, ["Digital View", "Graph View"])
         #w
         # self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
+        tk.Frame(gen_content, bg="#f0f0f0").pack(fill="both", expand=True)
+        gen_btn_frame = tk.Frame(gen_content, bg="#f0f0f0")
+        gen_btn_frame.pack(fill="x", pady=20)
+        tk.Button(gen_btn_frame, text="✔ SAVE GENERAL SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("General")).pack(pady=10)
 
         # ========== TAB 2: GRAPH ==========
         self.tab_frames["Graph"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Graph"].grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["Graph"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["Graph"].grid_columnconfigure(0, weight=1)
+
         graph_content = tk.Frame(self.tab_frames["Graph"], bg="#f0f0f0")
         graph_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -2522,9 +2545,24 @@ class SettingsFrame(tk.Frame):
         fr = tk.Frame(graph_content, bg="#f0f0f0"); fr.pack(pady=5)
         tk.Entry(fr, textvariable=controller.y_min, width=6, font=("Arial", 12)).pack(side="left"); tk.Label(fr, text="-", bg="#f0f0f0").pack(side="left")
         tk.Entry(fr, textvariable=controller.y_max, width=6, font=("Arial", 12)).pack(side="left")"""
+
+         # Add spacer to push button to bottom
+        tk.Frame(graph_content, bg="#f0f0f0").pack(fill="both", expand=True)
+    
+    # Save button for Graph tab
+        graph_btn_frame = tk.Frame(graph_content, bg="#f0f0f0")
+        graph_btn_frame.pack(fill="x", pady=20)
+        tk.Button(graph_btn_frame, text="✔ SAVE GRAPH SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("Graph")).pack(pady=10)
+
         
         # ========== TAB 3: TRANSMITTER ==========
         self.tab_frames["Transmitter"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Transmitter"].grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["Transmitter"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["Transmitter"].grid_columnconfigure(0, weight=1)
+
         tx_content = tk.Frame(self.tab_frames["Transmitter"], bg="#f0f0f0")
         tx_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -2550,9 +2588,23 @@ class SettingsFrame(tk.Frame):
         self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")
 
         self.create_static_row(tx_content, "Device Status:", "Connected")"""
+        # Add spacer to push button to bottom
+        tk.Frame(tx_content, bg="#f0f0f0").pack(fill="both", expand=True)
+    
+    # Save button for Transmitter tab
+        tx_btn_frame = tk.Frame(tx_content, bg="#f0f0f0")
+        tx_btn_frame.pack(fill="x", pady=20)
+        tk.Button(tx_btn_frame, text="✔ SAVE TRANSMITTER SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("Transmitter")).pack(pady=10)
+
 
         # ========== TAB 4: OUTPUTS ==========
         self.tab_frames["Outputs"] = tk.Frame(self.content_container, bg="#f0f0f0")
+
+        self.tab_frames["Outputs"].grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["Outputs"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["Outputs"].grid_columnconfigure(0, weight=1)
         outputs_content = tk.Frame(self.tab_frames["Outputs"], bg="#f0f0f0")
         outputs_content.pack(fill="both", expand=True, padx=30, pady=30)
 
@@ -2630,9 +2682,18 @@ class SettingsFrame(tk.Frame):
         prof_content = tk.Frame(tab_prof, bg="#f0f0f0")
         prof_content.pack(fill="both", expand=True, padx=20, pady=20)
         self.create_entry_row(prof_content, "Station Address:", controller.prof_station)"""
-        
+         # Save button for Outputs tab
+        outputs_btn_frame = tk.Frame(outputs_content, bg="#f0f0f0")
+        outputs_btn_frame.pack(fill="x", pady=(0, 10))
+        tk.Button(outputs_btn_frame, text="✔ SAVE OUTPUT SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("Outputs")).pack(pady=10)
         # ========== TAB 5: TROUBLESHOOTING ==========
         self.tab_frames["Troubleshooting"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["Troubleshooting"].grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["Troubleshooting"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["Troubleshooting"].grid_columnconfigure(0, weight=1)
+    
         debug_content = tk.Frame(self.tab_frames["Troubleshooting"], bg="#f0f0f0")
         debug_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -2654,8 +2715,22 @@ class SettingsFrame(tk.Frame):
         self.create_diag_row(port_diag_frame, "Connection Status:", controller.status_msg)
         self.create_diag_row(port_diag_frame, "Transmitter ID:", controller.transmitter_id_val)
         
+          
+    # Add spacer to push button to bottom
+        tk.Frame(debug_content, bg="#f0f0f0").pack(fill="both", expand=True)
+    
+    # Save button for Troubleshooting tab
+        debug_btn_frame = tk.Frame(debug_content, bg="#f0f0f0")
+        debug_btn_frame.pack(fill="x", pady=20)
+        tk.Button(debug_btn_frame, text="✔ SAVE DIAGNOSTICS SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("Troubleshooting")).pack(pady=10)
+
         # ========== TAB 6: HISTORY ==========
         self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["History"].grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["History"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["History"].grid_columnconfigure(0, weight=1)
         hist_content = tk.Frame(self.tab_frames["History"], bg="#f0f0f0")
         hist_content.pack(fill="both", expand=True, padx=30, pady=30)
         
@@ -2686,9 +2761,21 @@ class SettingsFrame(tk.Frame):
 
         """self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
         self.history_list.pack(fill="both", expand=True, pady=10)"""
+        tk.Frame(hist_content, bg="#f0f0f0").pack(fill="both", expand=True)
+    
+    # Save button for History tab
+        hist_btn_frame = tk.Frame(hist_content, bg="#f0f0f0")
+        hist_btn_frame.pack(fill="x", pady=20)
+        tk.Button(hist_btn_frame, text="✔ SAVE HISTORY SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("History")).pack(pady=10)
 
         # ========== TAB: RTD COMPENSATION ==========
         self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
+        self.tab_frames["RTD Compensation"].grid(row=0, column=0, sticky="nsew")
+        self.tab_frames["RTD Compensation"].grid_rowconfigure(0, weight=1)
+        self.tab_frames["RTD Compensation"].grid_columnconfigure(0, weight=1)
+
 
         rtd_content = tk.Frame(self.tab_frames["RTD Compensation"], bg="#f0f0f0")
         rtd_content.pack(fill="both", expand=True, padx=30, pady=30)
@@ -2707,18 +2794,134 @@ class SettingsFrame(tk.Frame):
             variable=controller.apply_rtd_compensation, command=self.on_rtd_compensation_changed,
                bg="#f0f0f0",font=("Arial", 11)).pack(side="left", padx=15)
         
+        # Add spacer to push button to bottom
+        tk.Frame(rtd_content, bg="#f0f0f0").pack(fill="both", expand=True)
+    
+    # Save button for RTD Compensation tab
+        rtd_btn_frame = tk.Frame(rtd_content, bg="#f0f0f0")
+        rtd_btn_frame.pack(fill="x", pady=20)
+        tk.Button(rtd_btn_frame, text="✔ SAVE RTD SETTINGS", bg="#4caf50", fg="white", 
+             font=("Arial", 12, "bold"), width=40, height=2,
+             command=lambda: self.save_tab_settings("RTD Compensation")).pack(pady=10)
+        
+       
         # Show first tab
         self.show_tab("General")
-
         
+
+
+    def save_tab_settings(self, tab_name):
+        """Save settings for a specific tab"""
+        try:
+           
+           current_tab = tab_name
+           if tab_name == "General":
+              self.save_general_settings()
+           elif tab_name == "Graph":
+             self.save_graph_settings()
+           elif tab_name == "Transmitter":
+              self.save_transmitter_settings()
+           elif tab_name == "Outputs":
+              self.save_output_settings()
+           elif tab_name == "Troubleshooting":
+              self.save_troubleshooting_settings()
+           elif tab_name == "History":
+             self.save_history_settings()
+           elif tab_name == "RTD Compensation":
+            self.save_rtd_settings()
+        
+        # Show success message
+           """ messagebox.showinfo(
+              f"✔ {tab_name} Settings Saved",
+               f"All {tab_name.lower()} settings have been saved successfully!"
+           )
+           logger.info(f"Saved {tab_name} settings")
+        
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save {tab_name} settings:\n{str(e)}")
+            logger.error(f"Error saving {tab_name} settings: {e}", exc_info=True)"""
+            
+           messagebox.showinfo("Success", f"{current_tab} settings saved")
+
+        except Exception as e:
+           messagebox.showerror("Error", f"Failed to save settings:\n{str(e)}")
+           logger.error(f"Save error: {e}", exc_info=True)
+    
+    def exit_settings(self):
+        """Exit settings without saving"""
+        logger.info("Exit settings pressed")
+        self.controller.show_frame("MainFrame")
+
+    def save_general_settings(self):
+        """Save General tab settings"""
+        station_name = self.controller.station_name.get()
+        view_mode = self.controller.view_mode.get()
+       
+        logger.info(f"Saving General Settings: Station={station_name}, View={view_mode}")
+    # Any additional validation or file write can go here
+
+    def save_graph_settings(self):
+       """Save Graph tab settings"""
+       time_scale = self.controller.time_scale_str.get()
+       y_min = self.controller.y_min.get()
+       y_max = self.controller.y_max.get()
+    
+       try:
+            y_min_val = float(y_min)
+            y_max_val = float(y_max)
+            if y_min_val >= y_max_val:
+               raise ValueError("Min value must be less than Max value")
+       except ValueError as e:
+           raise ValueError(f"Invalid temperature range: {e}")
+    
+       self.controller.update_buffer_size()
+       logger.info(f"Saving Graph Settings: Scale={time_scale}, Range={y_min}-{y_max}°C")
+
+    def save_transmitter_settings(self):
+        """Save Transmitter tab settings"""
+        transmitter_id = self.controller.transmitter_id_val.get()
+        logger.info(f"Saving Transmitter Settings: ID={transmitter_id}")
+
+    def save_output_settings(self):
+        """Save Output tab settings"""
+        output_port = self.output_port_combo.get()
+        baud_rate = self.output_baud_combo.get()
+    
+        logger.info(f"Saving Output Settings: Port={output_port}, Baud={baud_rate}")
+
+    def save_troubleshooting_settings(self):
+        """Save Troubleshooting tab settings"""
+        logger.info("Saving Troubleshooting/Diagnostics settings (read-only)")
+
+    def save_history_settings(self):
+        """Save History tab settings"""
+        date_from = self.date_from_var.get()
+        date_to = self.date_to_var.get()
+        logger.info(f"Saving History Settings: From={date_from}, To={date_to}")
+
+    def save_rtd_settings(self):
+        """Save RTD Compensation settings"""
+        rtd_enabled = self.controller.apply_rtd_compensation.get()
+        logger.info(f"Saving RTD Compensation: Enabled={rtd_enabled}")
+        self.on_rtd_compensation_changed()
+
         # ========== FOOTER BUTTONS ==========
         footer_frame = tk.Frame(self, bg="#f0f0f0", height=60)
         footer_frame.pack(fill="x", side="bottom", padx=0, pady=0)
         footer_frame.pack_propagate(False)
         
-        tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
-                  padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)
+        """tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
+                  padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)"""
         
+        bottom_frame = tk.Frame(self, bg="#d9d9d9", height=50)
+        bottom_frame.pack(side="bottom", fill="x")
+
+        back_btn = tk.Button(bottom_frame,text="← BACK TO DASHBOARD",bg="#3c3f41",fg="white",
+        font=("Arial", 11, "bold"),padx=20,pady=5,command=lambda: self.controller.show_frame("DashboardFrame")
+         ,activebackground="#000000", activeforeground="#ffffff")
+
+        back_btn.pack(side="right", padx=20, pady=8)
+
     def on_rtd_compensation_changed(self):
         """Handle RTD compensation checkbox toggle - send command in background thread (no lag)"""
         enabled = self.controller.apply_rtd_compensation.get()
@@ -2997,13 +3200,13 @@ class SettingsFrame(tk.Frame):
             messagebox.showerror("Export Error", str(e))
             logger.error(f"Output write error: {e}")
 
-    def save_and_exit(self):
+    """def save_and_exit(self):
         # apply updated graph buffer size based on time scale
         try:
             self.controller.update_buffer_size()
         except Exception:
             pass
-        self.controller.show_frame("DashboardFrame")
+        self.controller.show_frame("DashboardFrame")"""
      
     
     def check_password_for_exit(self):
