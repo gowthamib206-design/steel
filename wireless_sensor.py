@@ -1049,9 +1049,8 @@ class SensorGUI(tk.Tk):
         # Graph/History data variables
         self.buffer_size = 20
         self.temp_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
-        self.time_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.time_data = deque(maxlen=self.buffer_size)
         self.history_display = deque(maxlen=30)
-        self.x_counter = 0
 
         # Graph settings (used from settings tab)
         self.time_scale_str = tk.StringVar(value="1 Minute")
@@ -1227,6 +1226,8 @@ class DashboardFrame(tk.Frame):
         self.controller = controller
 
         self.grid_rowconfigure(1, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=0)
         self.grid_columnconfigure(0, weight=1)
         self.last_battery_alert = 0  # timestamp of last battery warning
         self.battery_alerted = False  # to prevent repeated popups
@@ -1298,14 +1299,22 @@ class DashboardFrame(tk.Frame):
         self.main_container.grid_rowconfigure(0, weight=1)
         self.main_container.grid_columnconfigure(0, weight=1)
         
+        self.bottom_container = tk.Frame(self, bg="#ffffff")
+        self.bottom_container.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
+        self.bottom_container.grid_rowconfigure(0, weight=0)
+        self.bottom_container.grid_rowconfigure(1, weight=0)
+        self.bottom_container.grid_columnconfigure(0, weight=1)
+        
         # Prepare graph frame (hidden until needed)
         self.graph_frame = tk.Frame(self, bg="white")
-        self.fig = Figure(figsize=(8, 5), dpi=100)
+        self.fig = Figure(figsize=(8, 3), dpi=100)
         self.fig.patch.set_facecolor('#ffffff')
         self.ax = self.fig.add_subplot(111)
         self.ax.set_title("Process Trend (Live)", fontsize=14, color='#666666')
         self.ax.set_facecolor('#f9f9f9')
         self.ax.grid(True, linestyle='--', alpha=0.5)
+        self.ax.set_xlabel("Time (seconds)", fontsize=12, color='#666666')
+        self.ax.set_ylabel("Melt Temperature (°C)", fontsize=12, color='#666666')
         self.line, = self.ax.plot([], [], 'r-', linewidth=3)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
@@ -1316,8 +1325,6 @@ class DashboardFrame(tk.Frame):
         temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
         temp_display_area.grid(row=0, column=0, sticky="nsew")
         temp_display_area.grid_rowconfigure(0, weight=1)
-        temp_display_area.grid_rowconfigure(1, weight=0)
-        temp_display_area.grid_rowconfigure(2, weight=0)  # Sensor data
         temp_display_area.grid_columnconfigure(0, weight=1)
         
         # Centered temperature section
@@ -1343,8 +1350,15 @@ class DashboardFrame(tk.Frame):
         # Temperature unit
         tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 24, "bold")).grid(row=2, column=0, pady=(0, 10))
         
-        alert_boxes_frame = tk.Frame(temp_display_area, bg="#ffffff")
-        alert_boxes_frame.grid(row=1, column=0, sticky="ew", pady=15, padx=20)
+        # Bottom container for alerts and sensor data
+        self.bottom_container = tk.Frame(self, bg="#ffffff")
+        self.bottom_container.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
+        self.bottom_container.grid_rowconfigure(0, weight=0)
+        self.bottom_container.grid_rowconfigure(1, weight=0)
+        self.bottom_container.grid_columnconfigure(0, weight=1)
+        
+        alert_boxes_frame = tk.Frame(self.bottom_container, bg="#ffffff")
+        alert_boxes_frame.grid(row=0, column=0, sticky="ew", pady=15, padx=20)
         alert_boxes_frame.grid_columnconfigure(0, weight=1)
         alert_boxes_frame.grid_columnconfigure(1, weight=1)
         alert_boxes_frame.grid_columnconfigure(2, weight=1)
@@ -1393,8 +1407,8 @@ class DashboardFrame(tk.Frame):
         self.rtd_alert_label.pack(pady=(8, 10))
 
         # Sensor data grid (RTD, Thermocouple, RSSI)
-        sensor_frame = tk.Frame(temp_display_area, bg="#ffffff")
-        sensor_frame.grid(row=2, column=0, sticky="ew", pady=20, padx=20)
+        sensor_frame = tk.Frame(self.bottom_container, bg="#ffffff")
+        sensor_frame.grid(row=1, column=0, sticky="ew", pady=20, padx=20)
         sensor_frame.grid_columnconfigure(0, weight=1)
         sensor_frame.grid_columnconfigure(1, weight=1)
         sensor_frame.grid_columnconfigure(2, weight=1)
@@ -1402,22 +1416,28 @@ class DashboardFrame(tk.Frame):
         # RTD sensor
         rtd_frame = tk.Frame(sensor_frame, bg="#ffffff")
         rtd_frame.grid(row=0, column=0, sticky="ew", padx=10)
-        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack()
+        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 10, "bold")).pack()
         tk.Label(rtd_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff",
-            font=("Arial", 26, "bold")).pack(pady=8)
-        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 13)).pack()
+            font=("Arial", 24, "bold")).pack(pady=8)
+        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 12)).pack()
 
         # DEVICE temperature sensor
         temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
         temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 12, "bold")).pack(anchor='e')
+        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack(anchor='e')
         tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
-             font=("Arial", 32, "bold")).pack(pady=10, anchor='e')
-        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 16)).pack(anchor='e')
+             font=("Arial", 28, "bold")).pack(pady=10, anchor='e')
+        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 14)).pack(anchor='e')
         
-        # Footer with controls
+        # RSSI sensor
+        rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
+        rssi_frame.grid(row=0, column=2, sticky="ew", padx=10)
+        tk.Label(rssi_frame, text="RSSI", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack()
+        tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#0066cc", bg="#ffffff",
+            font=("Arial", 24, "bold")).pack(pady=8)
+        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 12)).pack()
         footer = tk.Frame(self, bg="#e6e6e6", height=70)
-        footer.grid(row=2, column=0, sticky="nsew", padx=0, pady=0)
+        footer.grid(row=3, column=0, sticky="nsew", padx=0, pady=0)
         footer.grid_propagate(False)
         
          # Settings button (right)
@@ -1579,23 +1599,36 @@ class DashboardFrame(tk.Frame):
             self.graph_frame.grid_forget()
         except Exception:
             pass
+        try:
+            self.bottom_container.grid_forget()
+        except Exception:
+            pass
         self.lbl_graph_overlay.place_forget()
         if self.controller.view_mode.get() == "Digital View":
             self.main_container.grid(row=1, column=0, sticky="nsew")
+            self.bottom_container.grid(row=2, column=0, sticky="ew")
         else:
             self.graph_frame.grid(row=1, column=0, sticky="nsew")
             self.lbl_graph_overlay.place(relx=0.95, rely=0.05, anchor="ne")
+            self.bottom_container.grid(row=2, column=0, sticky="ew")
             self.update_graph()
 
     def update_graph(self):
         """Redraw live graph"""
-        x = list(self.controller.time_data)
+        if not self.controller.time_data:
+            return
+        start_time = self.controller.time_data[0]
+        x = [(t - start_time).total_seconds() for t in self.controller.time_data]
         y = list(self.controller.temp_data)
         if not x:
             return
         try:
             self.line.set_data(x, y)
             self.ax.relim()
+            # Set x-axis limit based on time scale
+            scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}
+            max_time = scale_map.get(self.controller.time_scale_str.get(), 60)
+            self.ax.set_xlim(0, max_time)
             if self.controller.y_axis_mode.get() == "Manual":
                 try:
                     self.ax.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
@@ -1897,9 +1930,8 @@ class DashboardFrame(tk.Frame):
             new_val = None
 
         if new_val is not None:
-            self.controller.x_counter += 1
             self.controller.temp_data.append(new_val)
-            self.controller.time_data.append(self.controller.x_counter)
+            self.controller.time_data.append(datetime.now())
 
             # compute battery pct if voltage available
             bat_pct = None
@@ -1946,6 +1978,10 @@ class DashboardFrame(tk.Frame):
             # Send packet to serial port
             logger.debug(f"[DASHBOARD] Writing packet to output port: {pkt}")
             self.controller.port_manager.write_byte(bytes(pkt))
+
+            # Update graph if in graph view
+            if self.controller.view_mode.get() == "Graph View" and "DashboardFrame" in self.controller.frames:
+                self.controller.frames["DashboardFrame"].update_graph()
 
             ts = datetime.now().strftime("%H:%M:%S")
             # history display still uses simplified string
@@ -2439,6 +2475,7 @@ class SettingsFrame(tk.Frame):
         self.temp_time_scale = tk.StringVar(value=controller.time_scale_str.get())
         self.temp_y_min = tk.StringVar(value=controller.y_min.get())
         self.temp_y_max = tk.StringVar(value=controller.y_max.get())
+        self.temp_y_axis_mode = tk.StringVar(value=controller.y_axis_mode.get())
         self.temp_units = tk.StringVar(value=controller.units.get())
         #self.temp_transmitter_id = tk.StringVar(value=controller.transmitter_id_val.get())
         #self.temp_history_enabled = tk.BooleanVar(value=True)
@@ -2554,6 +2591,13 @@ class SettingsFrame(tk.Frame):
         tk.Label(range_input_frame, text="Max (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
         max_entry = tk.Entry(range_input_frame, textvariable=self.temp_y_max, width=10, font=("Arial", 11))
         max_entry.pack(side="left", padx=5)
+
+        # Y-Axis Mode
+        mode_frame = tk.Frame(graph_content, bg="#f0f0f0")
+        mode_frame.pack(fill="x", pady=10)
+        tk.Label(mode_frame, text="Y-Axis Mode:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        tk.Radiobutton(mode_frame, text="Autoscale", variable=self.temp_y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack(side="left", padx=10)
+        tk.Radiobutton(mode_frame, text="Manual", variable=self.temp_y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack(side="left", padx=10)
 
         """tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
         tk.Radiobutton(graph_content, text="Manual", variable=controller.y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack()
@@ -2888,6 +2932,7 @@ class SettingsFrame(tk.Frame):
        self.controller.time_scale_str.set(self.temp_time_scale.get())
        self.controller.y_min.set(self.temp_y_min.get())
        self.controller.y_max.set(self.temp_y_max.get())
+       self.controller.y_axis_mode.set(self.temp_y_axis_mode.get())
 
        self.controller.update_buffer_size()
 
