@@ -2173,13 +2173,12 @@ class ConnectionSettings(tk.Toplevel):
         self._is_connected = is_connected
 
         self.title("Connection Settings")
-        self.geometry("420x250")
-        self.resizable(False, False)
+        self.state("zoomed")          # full screen like main window
+        self.minsize(900, 600)
+
         self.configure(bg="#f0f0f0")
 
-        self.transient(dashboard)
-        self.grab_set()
-
+       
         # ---------- TITLE ----------
         tk.Label(self,text="USB / COM Port Configuration",font=("Arial", 14, "bold"),bg="#f0f0f0"
         ).pack(pady=15)
