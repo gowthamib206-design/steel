@@ -987,6 +987,21 @@ class SensorGUI(tk.Tk):
         self.state('zoomed')
         self.minsize(1024, 600)
         self.configure(bg="#f0f0f0")
+        
+        # Get screen dimensions for responsive sizing
+        self.update_idletasks()
+        self.screen_w = self.winfo_screenwidth()
+        self.screen_h = self.winfo_screenheight()
+        
+        # Define responsive fonts based on screen height
+        self.font_large_temp = ("Arial", int(self.screen_h * 0.06), "bold")
+        self.font_unit = ("Arial", int(self.screen_h * 0.02), "bold")
+        self.font_title = ("Arial", int(self.screen_h * 0.015), "bold")
+        self.font_normal = ("Arial", int(self.screen_h * 0.02), "bold")
+        self.font_small = ("Arial", int(self.screen_h * 0.01), "bold")
+        self.font_header = ("Arial", int(self.screen_h * 0.025), "bold")
+        self.font_device = ("Arial", int(self.screen_h * 0.015), "bold")
+        self.font_rssi = ("Arial", int(self.screen_h * 0.03), "bold")
 
         # Load logo image (optional)
         logo_path = None
@@ -1004,8 +1019,8 @@ class SensorGUI(tk.Tk):
                 # e.g. running in headless test environment
                 pass
 
-            # Resize for display (50x50)
-            pil_image_resized = pil_image.resize((50, 50), Image.Resampling.LANCZOS)
+            # Resize for display
+            pil_image_resized = pil_image.resize((int(self.screen_w * 0.026), int(self.screen_h * 0.035)), Image.Resampling.LANCZOS)
             self.logo_img_small = ImageTk.PhotoImage(pil_image_resized)
         except Exception:
             # icon or file may not exist in unit test environment
@@ -1222,7 +1237,7 @@ class DashboardFrame(tk.Frame):
     """Main dashboard display - Full Screen"""
     
     def __init__(self,parent, controller):
-        super().__init__(parent, bg="#1a1a1a")
+        super().__init__(parent, bg="#ffffff")
         self.controller = controller
 
         self.grid_rowconfigure(1, weight=1)
@@ -1240,7 +1255,7 @@ class DashboardFrame(tk.Frame):
         self.is_connected = False  # Track connection state for ConnectionSettings persistence
 
         # Header
-        header = tk.Frame(self, bg="#e6e6e6", height=100)
+        header = tk.Frame(self, bg="#e6e6e6", height=int(self.controller.screen_h * 0.07))
         header.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
         header.grid_propagate(False)
         
@@ -1260,23 +1275,23 @@ class DashboardFrame(tk.Frame):
         left_info.pack(side="left", fill="y", padx=10, pady=15)
         
         tk.Label(left_info, textvariable=controller.station_name, fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 18, "bold")).pack(anchor="w")
+                font=controller.font_title).pack(anchor="w")
         
         device_frame = tk.Frame(left_info, bg="#e6e6e6")
         device_frame.pack(fill="x", pady=(5, 0))
-        tk.Label(device_frame, text="DEVICE ID:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
+        tk.Label(device_frame, text="DEVICE ID:", fg="#666666", bg="#e6e6e6", font=controller.font_normal).pack(side="left")
         tk.Label(device_frame, textvariable=controller.transmitter_id_val, fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 12, "bold")).pack(side="left", padx=5)
+                font=controller.font_device).pack(side="left", padx=5)
          
         # Time and status (center)
         center_info = tk.Frame(header, bg="#e6e6e6")
         center_info.pack(side="left", fill="both", expand=True, padx=20)
         
         self.lbl_time = tk.Label(center_info, text="00:00:00", fg="#333333", bg="#e6e6e6", 
-                                font=("Arial", 16, "bold"))
+                                font=controller.font_header)
         self.lbl_time.pack()
         self.lbl_date = tk.Label(center_info, text="DD-MMM-YYYY", fg="#666666", bg="#e6e6e6", 
-                                font=("Arial", 11))
+                                font=controller.font_normal)
         self.lbl_date.pack()
         self.update_clock()
         
@@ -1285,11 +1300,11 @@ class DashboardFrame(tk.Frame):
         right_info.pack(side="right", padx=30, pady=15)
         
         self.lbl_bat = tk.Label(right_info, text="BAT --%", fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 20, "bold"))
+                font=controller.font_rssi)
         self.lbl_bat.pack(anchor="e")
         controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}%"))
         self.lbl_rssi = tk.Label(right_info, text="SIGNAL STRENGTH(RSSI)", fg="#0055aa", bg="#e6e6e6", 
-                font=("Arial", 20, "bold"))
+                font=controller.font_rssi)
         self.lbl_rssi.pack(anchor="e")
         controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
        
@@ -1307,7 +1322,7 @@ class DashboardFrame(tk.Frame):
         
         # Prepare graph frame (hidden until needed)
         self.graph_frame = tk.Frame(self, bg="white")
-        self.fig = Figure(figsize=(8, 3), dpi=100)
+        self.fig = Figure(figsize=(self.controller.screen_w / 240, self.controller.screen_h / 480), dpi=100)
         self.fig.patch.set_facecolor('#ffffff')
         self.ax = self.fig.add_subplot(111)
         self.ax.set_title("Process Trend (Live)", fontsize=14, color='#666666')
@@ -1338,17 +1353,17 @@ class DashboardFrame(tk.Frame):
         center_frame.grid_columnconfigure(0, weight=1)
 
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff",
-             font=("Arial", 18, "bold")).grid(row=0, column=0, pady=(20, 10))
+             font=controller.font_title).grid(row=0, column=0, pady=(20, 10))
 
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3,width=700, height=180)
+        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3,width=int(controller.screen_w * 0.5), height=int(controller.screen_h * 0.12))
         temp_box.grid(row=1, column=0, pady=10, padx=20)
         temp_box.pack_propagate(False)
 
         tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff",
-             font=("Arial", 90, "bold"), padx=20, pady=15).pack()
+             font=controller.font_large_temp, padx=20, pady=15).pack()
 
         # Temperature unit
-        tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 24, "bold")).grid(row=2, column=0, pady=(0, 10))
+        tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=controller.font_unit).grid(row=2, column=0, pady=(0, 10))
         
         # Bottom container for alerts and sensor data
         self.bottom_container = tk.Frame(self, bg="#ffffff")
@@ -1376,10 +1391,10 @@ class DashboardFrame(tk.Frame):
         
         
         tk.Label(self.battery_alert_box, text="🔴 BATTERY", fg="#000000", bg="#ffffff",
-                font=("Arial", 16, "bold")).pack(pady=(8, 5))
+                font=controller.font_normal).pack(pady=(8, 5))
         
         self.battery_alert_label = tk.Label(self.battery_alert_box, text="Battery Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 24, "bold"))
+                font=controller.font_normal)
         self.battery_alert_label.pack(pady=(8, 10))
         
         # ==================== THERMOCOUPLE ALERT BOX ====================
@@ -1388,10 +1403,10 @@ class DashboardFrame(tk.Frame):
         
         
         tk.Label(self.tc_alert_box, text="🔴 THERMOCOUPLE", fg="#000000", bg="#ffffff",
-                font=("Arial", 16, "bold")).pack(pady=(8, 5))
+                font=controller.font_normal).pack(pady=(8, 5))
         
         self.tc_alert_label = tk.Label(self.tc_alert_box, text="Thermocouple Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 24, "bold"))
+                font=controller.font_normal)
         self.tc_alert_label.pack(pady=(8, 10))
         
         # ==================== RTD ALERT BOX ====================
@@ -1400,10 +1415,10 @@ class DashboardFrame(tk.Frame):
         
         
         tk.Label(self.rtd_alert_box, text="🔴 RTD", fg="#000000", bg="#ffffff",
-                font=("Arial", 16, "bold")).pack(pady=(8, 5))
+                font=controller.font_normal).pack(pady=(8, 5))
         
         self.rtd_alert_label = tk.Label(self.rtd_alert_box, text="RTD Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 24, "bold"))
+                font=controller.font_normal)
         self.rtd_alert_label.pack(pady=(8, 10))
 
         # Sensor data grid (RTD, Thermocouple, RSSI)
@@ -1416,27 +1431,27 @@ class DashboardFrame(tk.Frame):
         # RTD sensor
         rtd_frame = tk.Frame(sensor_frame, bg="#ffffff")
         rtd_frame.grid(row=0, column=0, sticky="ew", padx=10)
-        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 10, "bold")).pack()
+        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=controller.font_small).pack()
         tk.Label(rtd_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff",
-            font=("Arial", 24, "bold")).pack(pady=8)
-        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 12)).pack()
+            font=controller.font_rssi).pack(pady=8)
+        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=controller.font_small).pack()
 
         # DEVICE temperature sensor
         temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
         temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack(anchor='e')
+        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=controller.font_small).pack(anchor='e')
         tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
-             font=("Arial", 28, "bold")).pack(pady=10, anchor='e')
-        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 14)).pack(anchor='e')
+             font=controller.font_rssi).pack(pady=10, anchor='e')
+        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=controller.font_small).pack(anchor='e')
         
         # RSSI sensor
         rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
         rssi_frame.grid(row=0, column=2, sticky="ew", padx=10)
-        tk.Label(rssi_frame, text="RSSI", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack()
+        tk.Label(rssi_frame, text="RSSI", fg="#333333", bg="#ffffff", font=controller.font_small).pack()
         tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#0066cc", bg="#ffffff",
-            font=("Arial", 24, "bold")).pack(pady=8)
-        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 12)).pack()
-        footer = tk.Frame(self, bg="#e6e6e6", height=70)
+            font=controller.font_rssi).pack(pady=8)
+        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=controller.font_small).pack()
+        footer = tk.Frame(self, bg="#e6e6e6", height=int(self.controller.screen_h * 0.05))
         footer.grid(row=3, column=0, sticky="nsew", padx=0, pady=0)
         footer.grid_propagate(False)
         
