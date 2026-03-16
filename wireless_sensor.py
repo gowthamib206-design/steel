@@ -1340,7 +1340,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff",
              font=("Arial", 18, "bold")).grid(row=0, column=0, pady=(20, 10))
 
-        temp_box = tk.Frame(center_frame, bg="#d40000", relief="ridge", borderwidth=3,width=700, height=180)
+        temp_box = tk.Frame(center_frame, bg="#d40000",  borderwidth=3,width=700, height=180)
         temp_box.grid(row=1, column=0, pady=10, padx=20)
         temp_box.pack_propagate(False)
 
@@ -2476,9 +2476,7 @@ class SettingsFrame(tk.Frame):
         self.temp_y_max = tk.StringVar(value=controller.y_max.get())
         self.temp_y_axis_mode = tk.StringVar(value=controller.y_axis_mode.get())
         self.temp_units = tk.StringVar(value=controller.units.get())
-        #self.temp_transmitter_id = tk.StringVar(value=controller.transmitter_id_val.get())
-        #self.temp_history_enabled = tk.BooleanVar(value=True)
-
+        
 
         self.temp_rtd_enable = tk.BooleanVar(value=controller.apply_rtd_compensation.get())
 
@@ -2547,8 +2545,8 @@ class SettingsFrame(tk.Frame):
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         self.create_entry_row(gen_content, "Station Name:", self.temp_station_name)
         self.create_static_row(gen_content, "Sensor Type:", "Type B")
-        self.create_combobox_row(gen_content, "Dashboard View:",self.temp_view_mode,  ["Digital View", "Graph View"])
-        #w
+        #self.create_combobox_row(gen_content, "Dashboard View:",self.temp_view_mode,  ["Digital View", "Graph View"])
+        
         # self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
         tk.Frame(gen_content, bg="#f0f0f0").pack(fill="both", expand=True)
         gen_btn_frame = tk.Frame(gen_content, bg="#f0f0f0")
@@ -2571,6 +2569,7 @@ class SettingsFrame(tk.Frame):
         tk.Label(graph_content, text="Configure time scales and axis modes for live graph display", 
                 font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
         # interactive controls
+        self.create_combobox_row(graph_content, "Dashboard View:",self.temp_view_mode,  ["Digital View", "Graph View"])
         self.create_combobox_row(graph_content, "Time Scale:",self.temp_time_scale,  ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
         tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="nw",pady=(10,0))
 
@@ -2927,13 +2926,17 @@ class SettingsFrame(tk.Frame):
        logger.info(f"Saving Graph Settings: Scale={time_scale}, Range={y_min}-{y_max}°C")"""
     
     def save_graph_settings(self):
-
+       
+       self.controller.view_mode.set(self.temp_view_mode.get())
        self.controller.time_scale_str.set(self.temp_time_scale.get())
        self.controller.y_min.set(self.temp_y_min.get())
        self.controller.y_max.set(self.temp_y_max.get())
        self.controller.y_axis_mode.set(self.temp_y_axis_mode.get())
 
        self.controller.update_buffer_size()
+    # REFRESH DASHBOARD LAYOUT
+       if "DashboardFrame" in self.controller.frames:
+          self.controller.frames["DashboardFrame"].refresh_layout()
 
        print("Graph settings saved")
 
