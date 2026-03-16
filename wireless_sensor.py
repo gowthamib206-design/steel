@@ -1226,7 +1226,7 @@ class DashboardFrame(tk.Frame):
         self.controller = controller
 
         self.grid_rowconfigure(1, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(2, weight=0)
         self.grid_rowconfigure(3, weight=0)
         self.grid_columnconfigure(0, weight=1)
         self.last_battery_alert = 0  # timestamp of last battery warning
@@ -1340,7 +1340,7 @@ class DashboardFrame(tk.Frame):
         tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff",
              font=("Arial", 18, "bold")).grid(row=0, column=0, pady=(20, 10))
 
-        temp_box = tk.Frame(center_frame, bg="#d40000",  borderwidth=3,width=700, height=180)
+        temp_box = tk.Frame(center_frame, bg="#d40000",width=700, height=180)
         temp_box.grid(row=1, column=0, pady=10, padx=20)
         temp_box.pack_propagate(False)
 
