@@ -2287,7 +2287,8 @@ class ConnectionSettings(tk.Toplevel):
         self.status_label.pack(pady=(0, 8))
 
         # populate combo (disabled until password)
-        self.update_ports()
+        #self.update_ports()
+        self.after(50, self.update_ports)
 
         self.protocol("WM_DELETE_WINDOW", self.on_window_close)
 
@@ -2467,6 +2468,7 @@ class SettingsFrame(tk.Frame):
         super().__init__(parent, bg="#f0f0f0")
         self.controller = controller
         logger.info("Initializing SettingsFrame")
+        self.after(30, self.load_tabs_lazy)
         
         # -------- Temporary variables for settings --------
         self.temp_station_name = tk.StringVar(value=controller.station_name.get())
@@ -3290,6 +3292,11 @@ class SettingsFrame(tk.Frame):
             self.exit_settings()
         elif password is not None:
             messagebox.showerror("Access Denied", "Wrong Password")
+
+    def load_tabs_lazy(self):
+       import threading
+       threading.Thread(target=self._load_tabs_bg, daemon=True).start()
+
     
     
 def main():
