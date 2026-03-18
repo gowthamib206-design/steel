@@ -2040,7 +2040,10 @@ class DashboardFrame(tk.Frame):
         else:
             if self.controller.rssi_val.get() == "":
                 self.controller.rssi_val.set("--")
-
+        try:
+            self._check_alerts(data)
+        except Exception as e:
+          print("Alert error:", e)
         
     
     def _check_alerts(self, data):
@@ -2469,18 +2472,49 @@ class SettingsFrame(tk.Frame):
         self.controller = controller
         logger.info("Initializing SettingsFrame")
         self.after(30, self.load_tabs_lazy)
+
+    # =========================
+# FIX FOR TAB LOADING ERROR
+# =========================
+
+    def load_tabs_lazy(self):
+       import threading
+       threading.Thread(target=self._load_tabs_bg, daemon=True).start()
+
+
+    def _load_tabs_bg(self):
+        try:
+          print("Loading tabs in background...")
+
+        # ✅ DO NOT TOUCH UI HERE
+
+        # Go back to UI thread safely
+          self.after(0, self._create_tabs_ui)
+
+        except Exception as e:
+           print("Error in _load_tabs_bg:", e)
+
+
+    def _create_tabs_ui(self):
+        try:
+           print("Creating tabs UI...")
+
+        # 👉 YOUR EXISTING TAB CODE GOES HERE
+
+        except Exception as e:
+          print("UI error:", e)
         
         # -------- Temporary variables for settings --------
-        self.temp_station_name = tk.StringVar(value=controller.station_name.get())
-        self.temp_view_mode = tk.StringVar(value=controller.view_mode.get())
-        self.temp_time_scale = tk.StringVar(value=controller.time_scale_str.get())
-        self.temp_y_min = tk.StringVar(value=controller.y_min.get())
-        self.temp_y_max = tk.StringVar(value=controller.y_max.get())
-        self.temp_y_axis_mode = tk.StringVar(value=controller.y_axis_mode.get())
-        self.temp_units = tk.StringVar(value=controller.units.get())
+        self.temp_station_name = tk.StringVar(value=self.controller.station_name.get())
+        self.temp_view_mode = tk.StringVar(value=self.controller.view_mode.get())
+        self.temp_time_scale = tk.StringVar(value=self.controller.time_scale_str.get())
+        self.temp_y_min = tk.StringVar(value=self.controller.y_min.get())
+        self.temp_y_max = tk.StringVar(value=self.controller.y_max.get())
+        self.temp_y_axis_mode = tk.StringVar(value=self.controller.y_axis_mode.get())
+        self.temp_units = tk.StringVar(value=self.controller.units.get())
         
 
-        self.temp_rtd_enable = tk.BooleanVar(value=controller.apply_rtd_compensation.get())
+        self.temp_rtd_enable = tk.BooleanVar(value=self.controller.apply_rtd_compensation.get())
 
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=60)
@@ -2634,7 +2668,7 @@ class SettingsFrame(tk.Frame):
         font=("Arial", 12, "bold")).pack(side="left")
 
 # ADD TRANSMITTER ID LABEL TO FRAME (NOT to tx_content)
-        self.tx_id_label = tk.Label(tx_frame, textvariable=controller.transmitter_id_val, 
+        self.tx_id_label = tk.Label(tx_frame, textvariable=self.controller.transmitter_id_val, 
          fg="#0055aa", bg="#f0f0f0", font=("Arial", 12, "bold"))
         self.tx_id_label.pack(side="left", padx=15)
 
@@ -2726,21 +2760,21 @@ class SettingsFrame(tk.Frame):
         self.out_notebook.add(tab_tcp, text="Modbus TCP")
         tcp_content = tk.Frame(tab_tcp, bg="#f0f0f0")
         tcp_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(tcp_content, "IP Address:", controller.eth_ip)
-        self.create_entry_row(tcp_content, "Port:", controller.eth_port)
+        self.create_entry_row(tcp_content, "IP Address:", self.controller.eth_ip)
+        self.create_entry_row(tcp_content, "Port:", self.controller.eth_port)
         
         """tab_420 = tk.Frame(self.out_notebook, bg="#f0f0f0")
         self.out_notebook.add(tab_420, text="4-20mA")
         analog_content = tk.Frame(tab_420, bg="#f0f0f0")
         analog_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(analog_content, "Temp @ 4mA:", controller.analog_low)
-        self.create_entry_row(analog_content, "Temp @ 20mA:", controller.analog_high)
+        self.create_entry_row(analog_content, "Temp @ 4mA:", self.controller.analog_low)
+        self.create_entry_row(analog_content, "Temp @ 20mA:", self.controller.analog_high)
         
         tab_prof = tk.Frame(self.out_notebook, bg="#f0f0f0")
         self.out_notebook.add(tab_prof, text="Profibus/Net")
         prof_content = tk.Frame(tab_prof, bg="#f0f0f0")
         prof_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(prof_content, "Station Address:", controller.prof_station)"""
+        self.create_entry_row(prof_content, "Station Address:", self.controller.prof_station)"""
          # Save button for Outputs tab
         outputs_btn_frame = tk.Frame(outputs_content, bg="#f0f0f0")
         outputs_btn_frame.pack(fill="x", pady=(0, 10))
@@ -2762,17 +2796,17 @@ class SettingsFrame(tk.Frame):
         diag_frame = tk.LabelFrame(debug_content, text="Sensor Diagnostics", bg="#f0f0f0", 
                                   font=("Arial", 12, "bold"), padx=15, pady=15)
         diag_frame.pack(fill="x", pady=10)
-        self.create_diag_row(diag_frame, "Raw ADC Hex:", controller.raw_hex)
-        self.create_diag_row(diag_frame, "Battery Voltage:", controller.bat_voltage)
+        self.create_diag_row(diag_frame, "Raw ADC Hex:", self.controller.raw_hex)
+        self.create_diag_row(diag_frame, "Battery Voltage:", self.controller.bat_voltage)
 
         # ✅ ADD THIS SECTION (Port diagnostics)
         port_diag_frame = tk.LabelFrame(debug_content, text="Port Diagnostics", bg="#f0f0f0", 
                                font=("Arial", 12, "bold"), padx=15, pady=15)
         port_diag_frame.pack(fill="x", pady=10)
 
-        self.create_diag_row(port_diag_frame, "Connected Port:", controller.com_port_val)
-        self.create_diag_row(port_diag_frame, "Connection Status:", controller.status_msg)
-        self.create_diag_row(port_diag_frame, "Transmitter ID:", controller.transmitter_id_val)
+        self.create_diag_row(port_diag_frame, "Connected Port:", self.controller.com_port_val)
+        self.create_diag_row(port_diag_frame, "Connection Status:", self.controller.status_msg)
+        self.create_diag_row(port_diag_frame, "Transmitter ID:", self.controller.transmitter_id_val)
         
       
         # ========== TAB 6: HISTORY ==========
