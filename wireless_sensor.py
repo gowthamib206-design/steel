@@ -2496,6 +2496,10 @@ class SettingsFrame(tk.Frame):
 
 
     def _create_tabs_ui(self):
+        self.content_container = tk.Frame(self, bg="#f0f0f0")
+        self.content_container.pack(fill="both", expand=True)
+
+        self.tab_frames = {}
         try:
            print("Creating tabs UI...")
 
@@ -2534,7 +2538,7 @@ class SettingsFrame(tk.Frame):
         tab_nav.pack_propagate(False)
         
         self.tab_buttons = {}
-        self.tab_frames = {}
+       
         tabs = ["General", "Graph", "Transmitter", "Outputs", "Troubleshooting", "History", "RTD Compensation"]
         
         for i, tab_name in enumerate(tabs):
@@ -3058,6 +3062,24 @@ class SettingsFrame(tk.Frame):
         # Hide all tabs
         for frame in self.tab_frames.values():
             frame.grid_remove()
+         # create if not exists
+        if tab_name not in self.tab_frames:
+
+           frame = tk.Frame(self.content_container, bg="#f0f0f0")
+           frame.pack(fill="both", expand=True)
+
+        # 👉 SHOW LOADING TEXT IMMEDIATELY
+           loading = tk.Label(frame, text="Loading...",
+                           font=("Arial", 14))
+           loading.pack(pady=50)
+
+           self.tab_frames[tab_name] = frame
+
+        # 👉 LOAD ACTUAL UI IN BACKGROUND
+           self.after(50, lambda: self._load_tab_content(tab_name, frame))
+
+        else:
+           self.tab_frames[tab_name].pack(fill="both", expand=True)
         
         # Show selected tab with proper grid config
         self.tab_frames[tab_name].grid(row=0, column=0, sticky="nsew")
@@ -3173,15 +3195,20 @@ class SettingsFrame(tk.Frame):
         data is received.  Conversions are performed using the raw integer
         fields so that no RTD compensation is accidentally applied.
         """
+        self.after(50, self.refresh_history)
         if not hasattr(self, "history_list"):
             return
+        import threading
+        threading.Thread(target=self._refresh_history_bg, daemon=True).start()
         self.history_list.delete(0, tk.END)
         try:
             self.controller.cursor.execute(
                 "SELECT timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw "
-                "FROM measurements ORDER BY id DESC LIMIT 30"
+                "FROM measurements ORDER BY id DESC LIMIT 200"
             )
             rows = self.controller.cursor.fetchall()
+            self.after(0, lambda: self._update_history_ui(rows))
+            
             for ts, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw in rows:
                 # format time only for display
                 try:
