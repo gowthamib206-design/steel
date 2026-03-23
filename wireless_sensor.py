@@ -32,8 +32,6 @@ matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from PIL import Image, ImageTk
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -1016,11 +1014,13 @@ class SensorGUI(tk.Tk):
         self.bind('<Escape>', lambda e: self.attributes('-fullscreen', False))
 
         self.sel = tk.StringVar(value="")
-        self.apply_rtd_compensation = tk.BooleanVar(value=True)  # Checkbox selected by default
         self.station_name = tk.StringVar(value="LADLE STATION 01")
+        self.station_name2 = tk.StringVar(value="LADLE STATION 02")
         self.view_mode = tk.StringVar(value="Digital View")
         # when view mode changes update dashboard layout
         self.view_mode.trace_add('write', lambda *args: self.frames.get("DashboardFrame").refresh_layout() if "DashboardFrame" in self.frames else None)
+        self.view_mode2 = tk.StringVar(value="Digital View")
+        self.view_mode2.trace_add('write', lambda *args: self.frames.get("DashboardFrame").refresh_layout() if "DashboardFrame" in self.frames else None)
         self.operator_name = tk.StringVar(value="")
         self.ip_address = tk.StringVar(value="")
         self.port_number = tk.StringVar(value="")
@@ -1050,6 +1050,9 @@ class SensorGUI(tk.Tk):
         self.buffer_size = 20
         self.temp_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
         self.time_data = deque(maxlen=self.buffer_size)
+        # TX2 graph buffers
+        self.temp_data2 = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.time_data2 = deque(maxlen=self.buffer_size)
         self.history_display = deque(maxlen=30)
 
         # Graph settings (used from settings tab)
@@ -1135,9 +1138,10 @@ class SensorGUI(tk.Tk):
                 logger.info("Old measurements table schema detected. Migrating to new schema...")
                 self.cursor.execute("ALTER TABLE measurements RENAME TO measurements_old")
                 self.conn.commit()
+                cols = []
         except sqlite3.OperationalError:
             # Table doesn't exist yet, that's fine
-            pass
+            cols = []
 
         # Create new schema table (will work whether table existed or not after migration)
         self.cursor.execute("""
@@ -1150,9 +1154,19 @@ class SensorGUI(tk.Tk):
                 rtd_raw INTEGER,
                 thermo_raw INTEGER,
                 batt_raw INTEGER,
-                rssi INTEGER
+                rssi INTEGER,
+                tx_index INTEGER DEFAULT 1
             )
         """)
+        # Add tx_index column to existing tables that don't have it yet
+        try:
+            self.cursor.execute("PRAGMA table_info(measurements)")
+            existing_cols = [row[1] for row in self.cursor.fetchall()]
+            if 'tx_index' not in existing_cols:
+                self.cursor.execute("ALTER TABLE measurements ADD COLUMN tx_index INTEGER DEFAULT 1")
+                self.conn.commit()
+        except Exception:
+            pass
         self.conn.commit()
         #logger.info("Database initialized with updated schema (station_name + rssi)")
 
@@ -1163,32 +1177,22 @@ class SensorGUI(tk.Tk):
                   rtd_raw: int,
                   thermo_raw: int,
                   batt_raw: int,
-                  rssi: int):
-        """Insert raw measurement values into the database.
-
-        Args:
-            device_id: human-readable 4-byte ID string
-            station_name: Station name (e.g., "LADLE STATION 01")
-            temp_raw: 32-bit integer representing temperature*10000
-            rtd_raw: 16-bit raw ADC reading for RTD
-            thermo_raw: 16-bit raw ADC reading for thermocouple
-            batt_raw: 16-bit raw ADC reading for battery voltage
-            rssi: Signal strength indicator
-        """
+                  rssi: int,
+                  tx_index: int = 1):
+        """Insert raw measurement values into the database."""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             self.cursor.execute(
-                "INSERT INTO measurements (timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (ts, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi)
+                "INSERT INTO measurements (timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi, tx_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (ts, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi, tx_index)
             )
-            # commit every 10 records instead of every single one
             if not hasattr(self, '_commit_counter'):
                 self._commit_counter = 0
             self._commit_counter += 1
             if self._commit_counter >= 10:
                 self.conn.commit()
                 self._commit_counter = 0
-            logger.debug(f"Logged measurement: {station_name} | {device_id} | RSSI: {rssi}")
+            logger.debug(f"Logged measurement TX{tx_index}: {station_name} | {device_id} | RSSI: {rssi}")
         except Exception as exc:
             logger.error(f"Database error: {exc}")
 
@@ -1226,6 +1230,8 @@ class SensorGUI(tk.Tk):
             self.buffer_size = new_len
             self.temp_data = deque(self.temp_data, maxlen=self.buffer_size)
             self.time_data = deque(self.time_data, maxlen=self.buffer_size)
+            self.temp_data2 = deque(self.temp_data2, maxlen=self.buffer_size)
+            self.time_data2 = deque(self.time_data2, maxlen=self.buffer_size)
 
     def show_frame(self, name):
         """Show specified frame"""
@@ -1303,18 +1309,31 @@ class DashboardFrame(tk.Frame):
         self.lbl_date.pack()
         self.update_clock()
         
-        # Battery and RSSI (right side)
+        # Battery and RSSI (right side) — both TX1 and TX2
         right_info = tk.Frame(header, bg="#e6e6e6")
-        right_info.pack(side="right", padx=30, pady=15)
-        
-        self.lbl_bat = tk.Label(right_info, text="BAT --%", fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 20, "bold"))
+        right_info.pack(side="right", padx=30, pady=10)
+
+        # TX1 column
+        tx1_right = tk.Frame(right_info, bg="#e6e6e6")
+        tx1_right.pack(side="left", padx=(0, 20))
+        tk.Label(tx1_right, text="TX1", fg="#d40000", bg="#e6e6e6", font=("Arial", 10, "bold")).pack(anchor="e")
+        self.lbl_bat = tk.Label(tx1_right, text="BAT --", fg="#333333", bg="#e6e6e6", font=("Arial", 14, "bold"))
         self.lbl_bat.pack(anchor="e")
-        controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}%"))
-        self.lbl_rssi = tk.Label(right_info, text="SIGNAL STRENGTH(RSSI)", fg="#0055aa", bg="#e6e6e6", 
-                font=("Arial", 20, "bold"))
+        controller.battery_val.trace_add('write', lambda *args: self.lbl_bat.config(text=f"BAT {controller.battery_val.get()}"))
+        self.lbl_rssi = tk.Label(tx1_right, text="RSSI --", fg="#d40000", bg="#e6e6e6", font=("Arial", 14, "bold"))
         self.lbl_rssi.pack(anchor="e")
-        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
+        controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"RSSI {controller.rssi_val.get()}"))
+
+        # TX2 column
+        tx2_right = tk.Frame(right_info, bg="#e6e6e6")
+        tx2_right.pack(side="left")
+        tk.Label(tx2_right, text="TX2", fg="#0055aa", bg="#e6e6e6", font=("Arial", 10, "bold")).pack(anchor="e")
+        self.lbl_bat2 = tk.Label(tx2_right, text="BAT --", fg="#333333", bg="#e6e6e6", font=("Arial", 14, "bold"))
+        self.lbl_bat2.pack(anchor="e")
+        controller.battery_val2.trace_add('write', lambda *args: self.lbl_bat2.config(text=f"BAT {controller.battery_val2.get()}"))
+        self.lbl_rssi2 = tk.Label(tx2_right, text="RSSI --", fg="#0055aa", bg="#e6e6e6", font=("Arial", 14, "bold"))
+        self.lbl_rssi2.pack(anchor="e")
+        controller.rssi_val2.trace_add('write', lambda *args: self.lbl_rssi2.config(text=f"RSSI {controller.rssi_val2.get()}"))
        
         # Main content area - two transmitter panels side by side
         self.main_container = tk.Frame(self, bg="#ffffff")
@@ -1329,27 +1348,46 @@ class DashboardFrame(tk.Frame):
         self.bottom_container.grid_rowconfigure(1, weight=0)
         self.bottom_container.grid_columnconfigure(0, weight=1)
 
-        # Prepare graph frame (hidden until needed)
-        self.graph_frame = tk.Frame(self, bg="white")
-        self.fig = Figure(figsize=(8, 3), dpi=100)
-        self.fig.patch.set_facecolor('#ffffff')
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_title("Process Trend (Live)", fontsize=14, color='#666666')
-        self.ax.set_facecolor('#f9f9f9')
-        self.ax.grid(True, linestyle='--', alpha=0.5)
-        self.ax.set_xlabel("Time (seconds)", fontsize=12, color='#666666')
-        self.ax.set_ylabel("Melt Temperature (°C)", fontsize=12, color='#666666')
-        self.line, = self.ax.plot([], [], 'r-', linewidth=3)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-        self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.thermo_val,
-                          bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
+        # Prepare graph figures (embedded inside each TX panel, not a separate container)
+        # These are created here so they exist before _build_tx_panel is called
+        self.fig1 = Figure(figsize=(5, 3), dpi=100)
+        self.fig1.patch.set_facecolor('#ffffff')
+        self.ax1 = self.fig1.add_subplot(111)
+        self.ax1.set_title("TX1 — Process Trend (Live)", fontsize=12, color='#d40000')
+        self.ax1.set_facecolor('#f9f9f9')
+        self.ax1.grid(True, linestyle='--', alpha=0.5)
+        self.ax1.set_xlabel("Time (seconds)", fontsize=10, color='#666666')
+        self.ax1.set_ylabel("Melt Temp (°C)", fontsize=10, color='#666666')
+        self.line1, = self.ax1.plot([], [], 'r-', linewidth=2)
+
+        self.fig2 = Figure(figsize=(5, 3), dpi=100)
+        self.fig2.patch.set_facecolor('#ffffff')
+        self.ax2 = self.fig2.add_subplot(111)
+        self.ax2.set_title("TX2 — Process Trend (Live)", fontsize=12, color='#0055aa')
+        self.ax2.set_facecolor('#f9f9f9')
+        self.ax2.grid(True, linestyle='--', alpha=0.5)
+        self.ax2.set_xlabel("Time (seconds)", fontsize=10, color='#666666')
+        self.ax2.set_ylabel("Melt Temp (°C)", fontsize=10, color='#666666')
+        self.line2, = self.ax2.plot([], [], 'b-', linewidth=2)
+
+        # Legacy refs
+        self.graph_frame = tk.Frame(self)  # dummy, kept so old refs don't crash
+        self.fig = self.fig1
+        self.ax = self.ax1
+        self.line = self.line1
+        self.lbl_graph_overlay = tk.Label(self.graph_frame)   # dummy
+        self.lbl_graph_overlay2 = tk.Label(self.graph_frame)  # dummy
+
+        # Per-panel view mode (independent)
+        self.tx1_view = "Digital"   # "Digital" or "Graph"
+        self.tx2_view = "Digital"
 
         # ===== TRANSMITTER 1 PANEL =====
         tx1_panel = tk.Frame(self.main_container, bg="#ffffff", relief="solid", borderwidth=1)
         tx1_panel.grid(row=0, column=0, sticky="nsew", padx=(5, 2), pady=5)
         tx1_panel.grid_rowconfigure(1, weight=1)
         tx1_panel.grid_columnconfigure(0, weight=1)
+        self.tx1_panel = tx1_panel
         self._build_tx_panel(tx1_panel, controller, tx_index=1)
 
         # ===== TRANSMITTER 2 PANEL =====
@@ -1357,6 +1395,7 @@ class DashboardFrame(tk.Frame):
         tx2_panel.grid(row=0, column=1, sticky="nsew", padx=(2, 5), pady=5)
         tx2_panel.grid_rowconfigure(1, weight=1)
         tx2_panel.grid_columnconfigure(0, weight=1)
+        self.tx2_panel = tx2_panel
         self._build_tx_panel(tx2_panel, controller, tx_index=2)
 
         footer = tk.Frame(self, bg="#e6e6e6", height=10)
@@ -1364,18 +1403,18 @@ class DashboardFrame(tk.Frame):
         footer.grid_propagate(False)
         
     def _build_tx_panel(self, parent, controller, tx_index):
-        """Build a single transmitter display panel (tx_index=1 or 2)."""
+        """Build a single transmitter display panel with independent graph/digital toggle."""
         is_tx1 = (tx_index == 1)
         thermo_var = controller.thermo_val if is_tx1 else controller.thermo_val2
-        rtd_var = controller.rtd_temp if is_tx1 else controller.rtd_temp2
-        current_var = controller.current_temp if is_tx1 else controller.current_temp2
-        rssi_var = controller.rssi_val if is_tx1 else controller.rssi_val2
-        tx_id_var = controller.transmitter_id_val if is_tx1 else controller.transmitter_id_val2
+        rtd_var    = controller.rtd_temp   if is_tx1 else controller.rtd_temp2
+        current_var= controller.current_temp if is_tx1 else controller.current_temp2
+        rssi_var   = controller.rssi_val   if is_tx1 else controller.rssi_val2
+        tx_id_var  = controller.transmitter_id_val if is_tx1 else controller.transmitter_id_val2
         label_color = "#d40000" if is_tx1 else "#0055aa"
         title = f"TRANSMITTER {tx_index}"
 
-        parent.grid_rowconfigure(0, weight=0)  # title
-        parent.grid_rowconfigure(1, weight=1)  # temp display
+        parent.grid_rowconfigure(0, weight=0)  # title bar
+        parent.grid_rowconfigure(1, weight=1)  # content (digital or graph)
         parent.grid_rowconfigure(2, weight=0)  # alerts
         parent.grid_rowconfigure(3, weight=0)  # sensor data
         parent.grid_rowconfigure(4, weight=0)  # footer buttons
@@ -1390,13 +1429,13 @@ class DashboardFrame(tk.Frame):
         tk.Label(title_bar, textvariable=tx_id_var, fg="#ffffff", bg=label_color,
                  font=("Arial", 11)).pack(side="right", padx=10, pady=8)
 
-        # --- Temperature display ---
-        temp_area = tk.Frame(parent, bg="#ffffff")
-        temp_area.grid(row=1, column=0, sticky="nsew", pady=(5, 0))
-        temp_area.grid_rowconfigure(0, weight=1)
-        temp_area.grid_columnconfigure(0, weight=1)
+        # --- Digital content frame ---
+        digital_frame = tk.Frame(parent, bg="#ffffff")
+        digital_frame.grid(row=1, column=0, sticky="nsew")
+        digital_frame.grid_rowconfigure(0, weight=1)
+        digital_frame.grid_columnconfigure(0, weight=1)
 
-        center = tk.Frame(temp_area, bg="#ffffff")
+        center = tk.Frame(digital_frame, bg="#ffffff")
         center.grid(row=0, column=0, sticky="nsew")
         center.grid_columnconfigure(0, weight=1)
 
@@ -1411,6 +1450,32 @@ class DashboardFrame(tk.Frame):
 
         tk.Label(center, text="°C", fg="#333333", bg="#ffffff",
                  font=("Arial", 18, "bold")).grid(row=2, column=0, pady=(0, 5))
+
+        # --- Graph content frame (hidden by default) ---
+        graph_frame = tk.Frame(parent, bg="white")
+        # NOT gridded yet — shown on toggle
+
+        # Create the matplotlib canvas inside this panel's graph_frame
+        if is_tx1:
+            self.canvas1 = FigureCanvasTkAgg(self.fig1, master=graph_frame)
+            self.canvas1.get_tk_widget().pack(fill="both", expand=True)
+            lbl_ov = tk.Label(graph_frame, textvariable=thermo_var,
+                              bg="white", fg=label_color, font=("Arial", 28, "bold"))
+            lbl_ov.place(relx=0.97, rely=0.05, anchor="ne")
+        else:
+            self.canvas2 = FigureCanvasTkAgg(self.fig2, master=graph_frame)
+            self.canvas2.get_tk_widget().pack(fill="both", expand=True)
+            lbl_ov = tk.Label(graph_frame, textvariable=thermo_var,
+                              bg="white", fg=label_color, font=("Arial", 28, "bold"))
+            lbl_ov.place(relx=0.97, rely=0.05, anchor="ne")
+
+        # Store refs for toggling
+        if is_tx1:
+            self.tx1_digital_frame = digital_frame
+            self.tx1_graph_frame   = graph_frame
+        else:
+            self.tx2_digital_frame = digital_frame
+            self.tx2_graph_frame   = graph_frame
 
         # --- Alert boxes ---
         alert_frame = tk.Frame(parent, bg="#ffffff")
@@ -1506,14 +1571,37 @@ class DashboardFrame(tk.Frame):
                       command=self.check_password).pack(side="left", padx=8, pady=10)
             tk.Button(btn_frame, text="⚙ CONFIGURATION", bg="#cccccc", fg="black",
                       font=("Arial", 10, "bold"), width=18,
-                      command=self.check_configuration_password).pack(side="left", padx=8, pady=10)
+                      command=lambda: self.check_configuration_password(1)).pack(side="left", padx=8, pady=10)
         else:
             tk.Button(btn_frame, text="⚙ PAIR DEVICE", bg="#cccccc", fg="black",
                       font=("Arial", 10, "bold"), width=18,
                       command=self.check_password2).pack(side="left", padx=8, pady=10)
             tk.Button(btn_frame, text="⚙ CONFIGURATION", bg="#cccccc", fg="black",
                       font=("Arial", 10, "bold"), width=18,
-                      command=self.check_configuration_password).pack(side="left", padx=8, pady=10)
+                      command=lambda: self.check_configuration_password(2)).pack(side="left", padx=8, pady=10)
+
+    def _toggle_panel_view(self, tx_index):
+        """Toggle a single TX panel between Digital and Graph view."""
+        if tx_index == 1:
+            if self.tx1_view == "Digital":
+                self.tx1_digital_frame.grid_remove()
+                self.tx1_graph_frame.grid(row=1, column=0, sticky="nsew")
+                self.tx1_view = "Graph"
+                self.update_graph()
+            else:
+                self.tx1_graph_frame.grid_remove()
+                self.tx1_digital_frame.grid(row=1, column=0, sticky="nsew")
+                self.tx1_view = "Digital"
+        else:
+            if self.tx2_view == "Digital":
+                self.tx2_digital_frame.grid_remove()
+                self.tx2_graph_frame.grid(row=1, column=0, sticky="nsew")
+                self.tx2_view = "Graph"
+                self.update_graph()
+            else:
+                self.tx2_graph_frame.grid_remove()
+                self.tx2_digital_frame.grid(row=1, column=0, sticky="nsew")
+                self.tx2_view = "Digital"
 
     def check_paired_device_password(self):
         """Check password for Paired Device button"""
@@ -1523,10 +1611,18 @@ class DashboardFrame(tk.Frame):
         elif password is not None:
             messagebox.showerror("Access Denied", "Incorrect Password")
 
-    def check_configuration_password(self):
+    def check_configuration_password(self, tx_index=1):
         """Check password for Configuration button"""
         password = simpledialog.askstring("Security", "Enter Configuration Password:", show='*')
         if password == "1111":
+            sf = self.controller.frames.get("SettingsFrame")
+            if sf:
+                sf.active_tx = tx_index
+                # Sync temp vars to current values before showing
+                sf.temp_view_mode.set(self.controller.view_mode.get())
+                sf.temp_view_mode2.set(self.controller.view_mode2.get())
+                sf.refresh_graph_view_row()
+                sf.refresh_active_tx_vars()
             self.controller.show_frame("SettingsFrame")
         elif password is not None:
             messagebox.showerror("Access Denied", "Incorrect Password")
@@ -1656,49 +1752,67 @@ class DashboardFrame(tk.Frame):
         self.after(1000, self.update_clock)
 
     def refresh_layout(self):
-        """Toggle between digital and graph view depending on controller setting"""
+        """Apply per-panel view mode from settings."""
         try:
-            self.main_container.grid_forget()
-        except Exception:
-            pass
-        try:
-            self.graph_frame.grid_forget()
-        except Exception:
-            pass
-        self.lbl_graph_overlay.place_forget()
-        if self.controller.view_mode.get() == "Digital View":
             self.main_container.grid(row=1, column=0, sticky="nsew")
-        else:
-            self.graph_frame.grid(row=1, column=0, sticky="nsew")
-            self.lbl_graph_overlay.place(relx=0.95, rely=0.05, anchor="ne")
-            self.update_graph()
+        except Exception:
+            pass
+        # TX1
+        want1 = "Graph" if self.controller.view_mode.get() == "Graph View" else "Digital"
+        if getattr(self, 'tx1_view', 'Digital') != want1:
+            self._toggle_panel_view(1)
+        # TX2
+        want2 = "Graph" if self.controller.view_mode2.get() == "Graph View" else "Digital"
+        if getattr(self, 'tx2_view', 'Digital') != want2:
+            self._toggle_panel_view(2)
 
     def update_graph(self):
-        """Redraw live graph"""
-        if not self.controller.time_data:
-            return
-        start_time = self.controller.time_data[0]
-        x = [(t - start_time).total_seconds() for t in self.controller.time_data]
-        y = list(self.controller.temp_data)
-        if not x:
-            return
-        try:
-            self.line.set_data(x, y)
-            self.ax.relim()
-            # Set x-axis limit based on time scale
-            scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}
-            max_time = scale_map.get(self.controller.time_scale_str.get(), 60)
-            self.ax.set_xlim(0, max_time)
-            if self.controller.y_axis_mode.get() == "Manual":
-                try:
-                    self.ax.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
-                except Exception:
-                    pass
-            else:
-                self.ax.autoscale(enable=True, axis='y')
-            self.canvas.draw()
-        except Exception:
-            pass
+        """Redraw live graphs for panels currently in graph view."""
+        ctrl = self.controller
+        scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}
+        max_time = scale_map.get(ctrl.time_scale_str.get(), 60)
+
+        # TX1 graph (only if in graph view)
+        if getattr(self, 'tx1_view', 'Digital') == "Graph":
+            try:
+                if ctrl.time_data:
+                    start1 = ctrl.time_data[0]
+                    x1 = [(t - start1).total_seconds() for t in ctrl.time_data]
+                    y1 = list(ctrl.temp_data)
+                    self.line1.set_data(x1, y1)
+                    self.ax1.relim()
+                    self.ax1.set_xlim(0, max_time)
+                    if ctrl.y_axis_mode.get() == "Manual":
+                        try:
+                            self.ax1.set_ylim(ctrl.y_min.get(), ctrl.y_max.get())
+                        except Exception:
+                            pass
+                    else:
+                        self.ax1.autoscale(enable=True, axis='y')
+                    self.canvas1.draw()
+            except Exception:
+                pass
+
+        # TX2 graph (only if in graph view)
+        if getattr(self, 'tx2_view', 'Digital') == "Graph":
+            try:
+                if ctrl.time_data2:
+                    start2 = ctrl.time_data2[0]
+                    x2 = [(t - start2).total_seconds() for t in ctrl.time_data2]
+                    y2 = list(ctrl.temp_data2)
+                    self.line2.set_data(x2, y2)
+                    self.ax2.relim()
+                    self.ax2.set_xlim(0, max_time)
+                    if ctrl.y_axis_mode.get() == "Manual":
+                        try:
+                            self.ax2.set_ylim(ctrl.y_min.get(), ctrl.y_max.get())
+                        except Exception:
+                            pass
+                    else:
+                        self.ax2.autoscale(enable=True, axis='y')
+                    self.canvas2.draw()
+            except Exception:
+                pass
 
     def _open_port(self):
         """Open selected port in background thread (non-blocking)."""
@@ -1968,6 +2082,9 @@ class DashboardFrame(tk.Frame):
             if is_tx1:
                 ctrl.temp_data.append(new_val)
                 ctrl.time_data.append(datetime.now())
+            else:
+                ctrl.temp_data2.append(new_val)
+                ctrl.time_data2.append(datetime.now())
 
             bat_pct = None
             batt = getattr(data, "battery_voltage", None)
@@ -1992,21 +2109,21 @@ class DashboardFrame(tk.Frame):
             thermo_int = (thermo_int << 8) | pkt[12]
             batt_int = (pkt[15] << 8) | pkt[14]
 
-            station_name = ctrl.station_name.get() or "UNKNOWN"
+            station_name = (ctrl.station_name if is_tx1 else ctrl.station_name2).get() or "UNKNOWN"
             rssi_val = getattr(data, "rssi", 0) or 0
             try:
                rssi_int = int(float(str(rssi_val).replace(" dBm", "").strip()))
             except Exception:
                rssi_int = 0
 
-            ctrl.log_to_db(station_name, dev_id, temp_int, rtd_int, thermo_int, batt_int, rssi_int)
+            ctrl.log_to_db(station_name, dev_id, temp_int, rtd_int, thermo_int, batt_int, rssi_int, tx_index)
 
             if is_tx1:
                 logger.debug(f"[DASHBOARD TX1] Writing packet to output port: {pkt}")
                 ctrl.port_manager.write_byte(bytes(pkt))
 
-                if ctrl.view_mode.get() == "Graph View" and "DashboardFrame" in ctrl.frames:
-                    ctrl.frames["DashboardFrame"].update_graph()
+            if ctrl.view_mode.get() == "Graph View" and "DashboardFrame" in ctrl.frames:
+                ctrl.frames["DashboardFrame"].update_graph()
 
             ts = datetime.now().strftime("%H:%M:%S")
             ctrl.history_display.appendleft(
@@ -2014,7 +2131,7 @@ class DashboardFrame(tk.Frame):
             )
             if is_tx1 and "DashboardFrame" in ctrl.frames:
                 try:
-                    ctrl.frames["DashboardFrame"].update_graph()
+                    pass  # graph already updated above
                 except Exception:
                     pass
 
@@ -2443,8 +2560,6 @@ class ConnectionSettings(tk.Toplevel):
        setattr(self.dashboard, self._is_connected_attr, True)
        setattr(self.controller, self._conn_status_key, "connected")
        self.status_label.config(text=f"✓ Connected to {port}", fg="green")
-    
-
 
     def _open_port_for_tx(self):
         """Open the selected port for this transmitter's port manager."""
@@ -2567,14 +2682,9 @@ class SettingsFrame(tk.Frame):
 
 
     def _create_tabs_ui(self):
-        self.content_container = tk.Frame(self, bg="#f0f0f0")
-        self.content_container.pack(fill="both", expand=True)
-
         self.tab_frames = {}
         try:
            print("Creating tabs UI...")
-
-        # 👉 YOUR EXISTING TAB CODE GOES HERE
 
         except Exception as e:
           print("UI error:", e)
@@ -2582,13 +2692,12 @@ class SettingsFrame(tk.Frame):
         # -------- Temporary variables for settings --------
         self.temp_station_name = tk.StringVar(value=self.controller.station_name.get())
         self.temp_view_mode = tk.StringVar(value=self.controller.view_mode.get())
+        self.temp_view_mode2 = tk.StringVar(value=self.controller.view_mode2.get())
         self.temp_time_scale = tk.StringVar(value=self.controller.time_scale_str.get())
         self.temp_y_min = tk.StringVar(value=self.controller.y_min.get())
         self.temp_y_max = tk.StringVar(value=self.controller.y_max.get())
         self.temp_y_axis_mode = tk.StringVar(value=self.controller.y_axis_mode.get())
         self.temp_units = tk.StringVar(value=self.controller.units.get())
-        
-
         self.temp_rtd_enable = tk.BooleanVar(value=self.controller.apply_rtd_compensation.get())
 
         # Header
@@ -2650,16 +2759,13 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["General"].grid_columnconfigure(0, weight=1)
     
         gen_content = tk.Frame(self.tab_frames["General"], bg="#f0f0f0")
-        gen_content.pack(fill="both", expand=True, padx=30, pady=30)
+        gen_content.pack(fill="x", padx=30, pady=30)
         
         tk.Label(gen_content, text="General Settings", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         self.create_entry_row(gen_content, "Station Name:", self.temp_station_name)
         self.create_static_row(gen_content, "Sensor Type:", "Type B")
-        #self.create_combobox_row(gen_content, "Dashboard View:",self.temp_view_mode,  ["Digital View", "Graph View"])
         
-        # self.create_combobox_row(gen_content, "Units:", controller.units, ["°C", "°F"])
-        tk.Frame(gen_content, bg="#f0f0f0").pack(fill="both", expand=True)
         gen_btn_frame = tk.Frame(gen_content, bg="#f0f0f0")
         gen_btn_frame.pack(fill="x", pady=20)
         tk.Button(gen_btn_frame, text="✔ SAVE GENERAL SETTINGS", bg="#4caf50", fg="white", 
@@ -2673,14 +2779,26 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["Graph"].grid_columnconfigure(0, weight=1)
 
         graph_content = tk.Frame(self.tab_frames["Graph"], bg="#f0f0f0")
-        graph_content.pack(fill="both", expand=True, padx=30, pady=30)
+        graph_content.pack(fill="x", padx=30, pady=30)
         
         tk.Label(graph_content, text="Graph  Settings", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
         tk.Label(graph_content, text="Configure time scales and axis modes for live graph display", 
                 font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
-        # interactive controls
-        self.create_combobox_row(graph_content, "Dashboard View:",self.temp_view_mode,  ["Digital View", "Graph View"])
+        # interactive controls — stored refs for show/hide per active TX
+        self.tx1_view_row = tk.Frame(graph_content, bg="#f0f0f0")
+        self.tx1_view_row.pack(fill="x", pady=8)
+        tk.Label(self.tx1_view_row, text="Graph View:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        ttk.Combobox(self.tx1_view_row, textvariable=self.temp_view_mode, values=["Digital View", "Graph View"], state="readonly", font=("Arial", 11), width=25).pack(side="left", padx=15)
+
+        self.tx2_view_row = tk.Frame(graph_content, bg="#f0f0f0")
+        self.tx2_view_row.pack(fill="x", pady=8)
+        tk.Label(self.tx2_view_row, text="Graph View:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        ttk.Combobox(self.tx2_view_row, textvariable=self.temp_view_mode2, values=["Digital View", "Graph View"], state="readonly", font=("Arial", 11), width=25).pack(side="left", padx=15)
+
+        # default: show only TX1 row
+        self.active_tx = 1
+        self.refresh_graph_view_row()
         self.create_combobox_row(graph_content, "Time Scale:",self.temp_time_scale,  ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
         tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="nw",pady=(10,0))
 
@@ -2715,9 +2833,6 @@ class SettingsFrame(tk.Frame):
         tk.Entry(fr, textvariable=controller.y_max, width=6, font=("Arial", 12)).pack(side="left")"""
 
          # Add spacer to push button to bottom
-        tk.Frame(graph_content, bg="#f0f0f0").pack(fill="both", expand=True)
-    
-    # Save button for Graph tab
         graph_btn_frame = tk.Frame(graph_content, bg="#f0f0f0")
         graph_btn_frame.pack(fill="x", pady=20)
         tk.Button(graph_btn_frame, text="✔ SAVE GRAPH SETTINGS", bg="#4caf50", fg="white", 
@@ -2732,7 +2847,7 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["Transmitter"].grid_columnconfigure(0, weight=1)
 
         tx_content = tk.Frame(self.tab_frames["Transmitter"], bg="#f0f0f0")
-        tx_content.pack(fill="both", expand=True, padx=30, pady=30)
+        tx_content.pack(fill="x", padx=30, pady=30)
         
         tk.Label(tx_content, text="Transmitter Information", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
@@ -2749,17 +2864,6 @@ class SettingsFrame(tk.Frame):
 
 # Device Status row (separate)
         self.create_static_row(tx_content, "Device Status:", "Connected")
-       
-        
-        """device_id = controller.transmitter_id_val.get() or "NOT PAIRED"
-        self.create_static_row(tx_content, "Paired Device:", device_id)
-        self.create_static_row(tx_content, "Firmware Version:", "v2.1.4-beta")
-
-        self.create_static_row(tx_content, "Device Status:", "Connected")"""
-        # Add spacer to push button to bottom
-        tk.Frame(tx_content, bg="#f0f0f0").pack(fill="both", expand=True)
-    
-    # Save button for Transmitter tab
         tx_btn_frame = tk.Frame(tx_content, bg="#f0f0f0")
         tx_btn_frame.pack(fill="x", pady=20)
         tk.Button(tx_btn_frame, text="✔ SAVE TRANSMITTER SETTINGS", bg="#4caf50", fg="white", 
@@ -2774,7 +2878,7 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["Outputs"].grid_rowconfigure(0, weight=1)
         self.tab_frames["Outputs"].grid_columnconfigure(0, weight=1)
         outputs_content = tk.Frame(self.tab_frames["Outputs"], bg="#f0f0f0")
-        outputs_content.pack(fill="both", expand=True, padx=30, pady=30)
+        outputs_content.pack(fill="x", padx=30, pady=30)
 
         tk.Label(outputs_content, text="Output Port Configuration", fg="#333333", bg="#f0f0f0", 
           font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
@@ -2863,7 +2967,7 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["Troubleshooting"].grid_columnconfigure(0, weight=1)
     
         debug_content = tk.Frame(self.tab_frames["Troubleshooting"], bg="#f0f0f0")
-        debug_content.pack(fill="both", expand=True, padx=30, pady=30)
+        debug_content.pack(fill="x", padx=30, pady=30)
         
         tk.Label(debug_content, text="Diagnostic Information", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
@@ -2871,18 +2975,35 @@ class SettingsFrame(tk.Frame):
         diag_frame = tk.LabelFrame(debug_content, text="Sensor Diagnostics", bg="#f0f0f0", 
                                   font=("Arial", 12, "bold"), padx=15, pady=15)
         diag_frame.pack(fill="x", pady=10)
-        self.create_diag_row(diag_frame, "Raw ADC Hex:", self.controller.raw_hex)
-        self.create_diag_row(diag_frame, "Battery Voltage:", self.controller.bat_voltage)
 
-        # ✅ ADD THIS SECTION (Port diagnostics)
+        f_hex = tk.Frame(diag_frame, bg="#f0f0f0"); f_hex.pack(fill="x", pady=8)
+        tk.Label(f_hex, text="Raw ADC Hex:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        self.diag_raw_hex_lbl = tk.Label(f_hex, textvariable=self.controller.raw_hex, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+        self.diag_raw_hex_lbl.pack(side="left", padx=15)
+
+        f_bat = tk.Frame(diag_frame, bg="#f0f0f0"); f_bat.pack(fill="x", pady=8)
+        tk.Label(f_bat, text="Battery Voltage:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        self.diag_bat_lbl = tk.Label(f_bat, textvariable=self.controller.bat_voltage, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+        self.diag_bat_lbl.pack(side="left", padx=15)
+
         port_diag_frame = tk.LabelFrame(debug_content, text="Port Diagnostics", bg="#f0f0f0", 
                                font=("Arial", 12, "bold"), padx=15, pady=15)
         port_diag_frame.pack(fill="x", pady=10)
 
-        self.create_diag_row(port_diag_frame, "Connected Port:", self.controller.com_port_val)
-        self.create_diag_row(port_diag_frame, "Connection Status:", self.controller.status_msg)
-        self.create_diag_row(port_diag_frame, "Transmitter ID:", self.controller.transmitter_id_val)
-        
+        f_port = tk.Frame(port_diag_frame, bg="#f0f0f0"); f_port.pack(fill="x", pady=8)
+        tk.Label(f_port, text="Connected Port:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        self.diag_port_lbl = tk.Label(f_port, textvariable=self.controller.com_port_val, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+        self.diag_port_lbl.pack(side="left", padx=15)
+
+        f_status = tk.Frame(port_diag_frame, bg="#f0f0f0"); f_status.pack(fill="x", pady=8)
+        tk.Label(f_status, text="Connection Status:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        self.diag_status_lbl = tk.Label(f_status, textvariable=self.controller.status_msg, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+        self.diag_status_lbl.pack(side="left", padx=15)
+
+        f_txid = tk.Frame(port_diag_frame, bg="#f0f0f0"); f_txid.pack(fill="x", pady=8)
+        tk.Label(f_txid, text="Transmitter ID:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        self.diag_txid_lbl = tk.Label(f_txid, textvariable=self.controller.transmitter_id_val, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+        self.diag_txid_lbl.pack(side="left", padx=15)
       
         # ========== TAB 6: HISTORY ==========
         self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
@@ -2890,7 +3011,7 @@ class SettingsFrame(tk.Frame):
         self.tab_frames["History"].grid_rowconfigure(0, weight=1)
         self.tab_frames["History"].grid_columnconfigure(0, weight=1)
         hist_content = tk.Frame(self.tab_frames["History"], bg="#f0f0f0")
-        hist_content.pack(fill="both", expand=True, padx=30, pady=30)
+        hist_content.pack(fill="x", padx=30, pady=30)
         
         tk.Label(hist_content, text="Measurement History", fg="#333333", bg="#f0f0f0", 
                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
@@ -2917,9 +3038,7 @@ class SettingsFrame(tk.Frame):
         tk.Button(range_frame, text="📥 Export Range to CSV", bg="#0066cc", fg="white",
               font=("Arial", 11, "bold"), command=self.export_csv).pack(side="right")
 
-        """self.history_list = tk.Listbox(hist_content, font=("Courier New", 11), height=12)
-        self.history_list.pack(fill="both", expand=True, pady=10)"""
-        tk.Frame(hist_content, bg="#f0f0f0").pack(fill="both", expand=True)
+        tk.Frame(hist_content, bg="#f0f0f0").pack(fill="x", pady=5)
     
         # ========== TAB: RTD COMPENSATION ==========
         self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
@@ -2929,7 +3048,7 @@ class SettingsFrame(tk.Frame):
 
 
         rtd_content = tk.Frame(self.tab_frames["RTD Compensation"], bg="#f0f0f0")
-        rtd_content.pack(fill="both", expand=True, padx=30, pady=30)
+        rtd_content.pack(fill="x", padx=30, pady=30)
 
         tk.Label(rtd_content,text="RTD Compensation Settings",fg="#333333",
          bg="#f0f0f0",font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
@@ -2944,9 +3063,6 @@ class SettingsFrame(tk.Frame):
         tk.Checkbutton(rtd_frame,text="Enable",
             variable=self.temp_rtd_enable, command=self.on_rtd_compensation_changed,
                bg="#f0f0f0",font=("Arial", 11)).pack(side="left", padx=15)
-        
-        # Add spacer to push button to bottom
-        tk.Frame(rtd_content, bg="#f0f0f0").pack(fill="both", expand=True)
     
     # Save button for RTD Compensation tab
         rtd_btn_frame = tk.Frame(rtd_content, bg="#f0f0f0")
@@ -3013,11 +3129,13 @@ class SettingsFrame(tk.Frame):
         logger.info(f"Saving General Settings: Station={station_name}, View={view_mode}")"""
     # Any additional validation or file write can go here
     def save_general_settings(self):
-       
-       self.controller.station_name.set(self.temp_station_name.get())
-       self.controller.view_mode.set(self.temp_view_mode.get())
-
-       print("General settings saved")
+        tx = getattr(self, 'active_tx', 1)
+        if tx == 1:
+            self.controller.station_name.set(self.temp_station_name.get())
+        else:
+            self.controller.station_name2.set(self.temp_station_name.get())
+        self.controller.view_mode.set(self.temp_view_mode.get())
+        print("General settings saved")
     
     """def save_graph_settings(self):
        
@@ -3036,20 +3154,80 @@ class SettingsFrame(tk.Frame):
        self.controller.update_buffer_size()
        logger.info(f"Saving Graph Settings: Scale={time_scale}, Range={y_min}-{y_max}°C")"""
     
+    def refresh_graph_view_row(self):
+        """Show only the view row for the active TX, hide the other."""
+        if not hasattr(self, 'tx1_view_row') or not hasattr(self, 'tx2_view_row'):
+            return
+        if getattr(self, 'active_tx', 1) == 1:
+            self.tx1_view_row.pack(fill="x", pady=8)
+            self.tx2_view_row.pack_forget()
+        else:
+            self.tx2_view_row.pack(fill="x", pady=8)
+            self.tx1_view_row.pack_forget()
+
+    def refresh_active_tx_vars(self):
+        """Swap all per-TX UI references to match the currently active TX."""
+        ctrl = self.controller
+        tx = getattr(self, 'active_tx', 1)
+
+        if tx == 1:
+            sn_var      = ctrl.station_name
+            rtd_var     = ctrl.apply_rtd_compensation
+            raw_hex_var = ctrl.raw_hex
+            bat_var     = ctrl.bat_voltage
+            port_var    = ctrl.com_port_val
+            status_var  = ctrl.status_msg
+            txid_var    = ctrl.transmitter_id_val
+        else:
+            sn_var      = ctrl.station_name2
+            rtd_var     = ctrl.apply_rtd_compensation2
+            raw_hex_var = ctrl.raw_hex2
+            bat_var     = ctrl.bat_voltage2
+            port_var    = ctrl.com_port_val2
+            status_var  = ctrl.status_msg2
+            txid_var    = ctrl.transmitter_id_val2
+
+        # General tab — station name entry
+        self.temp_station_name.set(sn_var.get())
+
+        # RTD tab — checkbox
+        self.temp_rtd_enable.set(rtd_var.get())
+
+        # Transmitter tab — paired device label
+        if hasattr(self, 'tx_id_label'):
+            self.tx_id_label.config(textvariable=txid_var)
+
+        # Troubleshooting tab — all diag labels
+        if hasattr(self, 'diag_raw_hex_lbl'):
+            self.diag_raw_hex_lbl.config(textvariable=raw_hex_var)
+        if hasattr(self, 'diag_bat_lbl'):
+            self.diag_bat_lbl.config(textvariable=bat_var)
+        if hasattr(self, 'diag_port_lbl'):
+            self.diag_port_lbl.config(textvariable=port_var)
+        if hasattr(self, 'diag_status_lbl'):
+            self.diag_status_lbl.config(textvariable=status_var)
+        if hasattr(self, 'diag_txid_lbl'):
+            self.diag_txid_lbl.config(textvariable=txid_var)
+
     def save_graph_settings(self):
-       
-       self.controller.view_mode.set(self.temp_view_mode.get())
-       self.controller.time_scale_str.set(self.temp_time_scale.get())
-       self.controller.y_min.set(self.temp_y_min.get())
-       self.controller.y_max.set(self.temp_y_max.get())
-       self.controller.y_axis_mode.set(self.temp_y_axis_mode.get())
+        # Only save the view mode for the active TX
+        active = getattr(self, 'active_tx', 1)
+        if active == 1:
+            self.controller.view_mode.set(self.temp_view_mode.get())
+        else:
+            self.controller.view_mode2.set(self.temp_view_mode2.get())
 
-       self.controller.update_buffer_size()
-    # REFRESH DASHBOARD LAYOUT
-       if "DashboardFrame" in self.controller.frames:
-          self.controller.frames["DashboardFrame"].refresh_layout()
+        self.controller.time_scale_str.set(self.temp_time_scale.get())
+        self.controller.y_min.set(self.temp_y_min.get())
+        self.controller.y_max.set(self.temp_y_max.get())
+        self.controller.y_axis_mode.set(self.temp_y_axis_mode.get())
 
-       print("Graph settings saved")
+        self.controller.update_buffer_size()
+        # REFRESH DASHBOARD LAYOUT
+        if "DashboardFrame" in self.controller.frames:
+            self.controller.frames["DashboardFrame"].refresh_layout()
+
+        print("Graph settings saved")
 
     def save_transmitter_settings(self):
         """Save Transmitter tab settings"""
@@ -3080,32 +3258,13 @@ class SettingsFrame(tk.Frame):
         date_to = self.date_to_var.get()
         logger.info(f"Saving History Settings: From={date_from}, To={date_to}")
 
-    """def save_rtd_settings(self):
-        
-        rtd_enabled = self.controller.apply_rtd_compensation.get()
-        logger.info(f"Saving RTD Compensation: Enabled={rtd_enabled}")
-        self.on_rtd_compensation_changed()"""
     def save_rtd_settings(self):
-
-        self.controller.apply_rtd_compensation.set(self.temp_rtd_enable.get())
-
+        tx = getattr(self, 'active_tx', 1)
+        if tx == 1:
+            self.controller.apply_rtd_compensation.set(self.temp_rtd_enable.get())
+        else:
+            self.controller.apply_rtd_compensation2.set(self.temp_rtd_enable.get())
         print("RTD settings saved")
-        # ========== FOOTER BUTTONS ==========
-        footer_frame = tk.Frame(self, bg="#f0f0f0", height=60)
-        footer_frame.pack(fill="x", side="bottom", padx=0, pady=0)
-        footer_frame.pack_propagate(False)
-        
-        """tk.Button(footer_frame, text="✔ SAVE & EXIT", bg="#4caf50", fg="white", font=("Arial", 14, "bold"),
-                  padx=30, pady=12, relief="raised", command=self.save_and_exit).pack(pady=10)"""
-        
-        """bottom_frame = tk.Frame(self, bg="#d9d9d9", height=50)
-        bottom_frame.pack(side="bottom", fill="x")
-
-        back_btn = tk.Button(bottom_frame,text="← BACK TO DASHBOARD",bg="#3c3f41",fg="white",
-        font=("Arial", 11, "bold"),padx=20,pady=5,command=lambda: self.controller.show_frame("DashboardFrame")
-         ,activebackground="#000000", activeforeground="#ffffff")
-
-        back_btn.pack(side="right", padx=20, pady=8)"""
 
     def on_rtd_compensation_changed(self):
         """Handle RTD compensation checkbox toggle - send command in background thread (no lag)"""
@@ -3364,11 +3523,13 @@ class SettingsFrame(tk.Frame):
                 params.append(to_ts)
 
             base_sql = "SELECT timestamp,station_name, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi FROM measurements"
-            if where_clauses:
-                sql = base_sql + " WHERE " + " AND ".join(where_clauses) + " ORDER BY id ASC"
-                self.controller.cursor.execute(sql, params)
-            else:
-                self.controller.cursor.execute(base_sql + " ORDER BY id ASC")
+            # filter strictly by tx_index — TX2 never sees TX1 data and vice versa
+            tx = getattr(self, 'active_tx', 1)
+            where_clauses.append("COALESCE(tx_index, 1) = ?")
+            params.append(tx)
+
+            sql = base_sql + " WHERE " + " AND ".join(where_clauses) + " ORDER BY id ASC"
+            self.controller.cursor.execute(sql, params)
             rows = self.controller.cursor.fetchall()
 
             with open(filename, 'w', newline='', encoding='utf-8') as f:
@@ -3377,7 +3538,7 @@ class SettingsFrame(tk.Frame):
                     "Date", "Station Name", "Transmitter ID", "MeltTemp_C", "RTDTemp_C",
                     "DeviceTemp_C", "BatteryVolts", "RSSI"
                 ])
-                for ts, dev_id, station_name_db, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db in rows:
+                for ts, station_name_db, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db in rows:
                     # date formatting
                     try:
                         dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
@@ -3418,16 +3579,11 @@ class SettingsFrame(tk.Frame):
      
     
     def check_password_for_exit(self):
-        
         password = simpledialog.askstring("Confirm", "Enter Password to Confirm:", show='*')
         if password == "1111":
             self.exit_settings()
         elif password is not None:
             messagebox.showerror("Access Denied", "Wrong Password")
-
-    def load_tabs_lazy(self):
-       import threading
-       threading.Thread(target=self._load_tabs_bg, daemon=True).start()
 
     
     
