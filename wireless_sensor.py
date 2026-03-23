@@ -1060,7 +1060,7 @@ class SensorGUI(tk.Tk):
         self.y_min = tk.DoubleVar(value=1500.0)
         self.y_max = tk.DoubleVar(value=1600.0)
 
-         # Observable variables
+         # Observable variables - TX1
         self.current_temp = tk.StringVar(value="--")
         self.device_id_val = tk.StringVar(value="NOT PAIRED")
         self.thermo_val = tk.StringVar(value="--")
@@ -1069,15 +1069,34 @@ class SensorGUI(tk.Tk):
         self.rssi_val = tk.StringVar(value="--")
         self.status_msg = tk.StringVar(value="Ready")
         self.is_reading = False
-        self.is_paired = tk.BooleanVar(value=False)  
+        self.is_paired = tk.BooleanVar(value=False)
         self.transmitter_id_val = tk.StringVar(value="WAITING")
         self.com_port_val = tk.StringVar(value="NOT CONNECTED")
 
-        
+        # Observable variables - TX2
+        self.current_temp2 = tk.StringVar(value="--")
+        self.device_id_val2 = tk.StringVar(value="NOT PAIRED")
+        self.thermo_val2 = tk.StringVar(value="--")
+        self.rtd_temp2 = tk.StringVar(value="--")
+        self.battery_val2 = tk.StringVar(value="--")
+        self.rssi_val2 = tk.StringVar(value="--")
+        self.status_msg2 = tk.StringVar(value="Ready")
+        self.is_reading2 = False
+        self.is_paired2 = tk.BooleanVar(value=False)
+        self.transmitter_id_val2 = tk.StringVar(value="WAITING")
+        self.com_port_val2 = tk.StringVar(value="NOT CONNECTED")
+        self.bat_voltage2 = tk.StringVar()
+        self.raw_hex2 = tk.StringVar()
+
         self.port_manager = SerialPortManager()
         self.packet_processor = PacketProcessor()
         self.data_parser = SensorDataParser()
-        self.output_port_serial = None   
+        self.output_port_serial = None
+
+        # TX2 independent serial/packet managers
+        self.port_manager2 = SerialPortManager()
+        self.packet_processor2 = PacketProcessor()
+        self.apply_rtd_compensation2 = tk.BooleanVar(value=False)
 
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
@@ -1237,7 +1256,8 @@ class DashboardFrame(tk.Frame):
         self.rtd_ready = False  # Flag to indicate RTD & TC data is received
         self.rtd_ready = False
         self.tc_fifo = []   # FIFO buffer for thermocouple averaging
-        self.is_connected = False  # Track connection state for ConnectionSettings persistence
+        self.is_connected = False   # TX1 connection state
+        self.is_connected2 = False  # TX2 connection state
 
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=100)
@@ -1264,9 +1284,12 @@ class DashboardFrame(tk.Frame):
         
         device_frame = tk.Frame(left_info, bg="#e6e6e6")
         device_frame.pack(fill="x", pady=(5, 0))
-        tk.Label(device_frame, text="DEVICE ID:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
-        tk.Label(device_frame, textvariable=controller.transmitter_id_val, fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 12, "bold")).pack(side="left", padx=5)
+        tk.Label(device_frame, text="TX1:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left")
+        tk.Label(device_frame, textvariable=controller.transmitter_id_val, fg="#d40000", bg="#e6e6e6",
+                font=("Arial", 11, "bold")).pack(side="left", padx=5)
+        tk.Label(device_frame, text="TX2:", fg="#666666", bg="#e6e6e6", font=("Arial", 10)).pack(side="left", padx=(10,0))
+        tk.Label(device_frame, textvariable=controller.transmitter_id_val2, fg="#0055aa", bg="#e6e6e6",
+                font=("Arial", 11, "bold")).pack(side="left", padx=5)
          
         # Time and status (center)
         center_info = tk.Frame(header, bg="#e6e6e6")
@@ -1293,18 +1316,19 @@ class DashboardFrame(tk.Frame):
         self.lbl_rssi.pack(anchor="e")
         controller.rssi_val.trace_add('write', lambda *args: self.lbl_rssi.config(text=f"SIGNAL STRENGTH(RSSI) {controller.rssi_val.get()}"))
        
-        # Main content area
+        # Main content area - two transmitter panels side by side
         self.main_container = tk.Frame(self, bg="#ffffff")
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=0, pady=0)
         self.main_container.grid_rowconfigure(0, weight=1)
         self.main_container.grid_columnconfigure(0, weight=1)
-        
+        self.main_container.grid_columnconfigure(1, weight=1)
+
         self.bottom_container = tk.Frame(self, bg="#ffffff")
         self.bottom_container.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
         self.bottom_container.grid_rowconfigure(0, weight=0)
         self.bottom_container.grid_rowconfigure(1, weight=0)
         self.bottom_container.grid_columnconfigure(0, weight=1)
-        
+
         # Prepare graph frame (hidden until needed)
         self.graph_frame = tk.Frame(self, bg="white")
         self.fig = Figure(figsize=(8, 3), dpi=100)
@@ -1321,133 +1345,176 @@ class DashboardFrame(tk.Frame):
         self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.thermo_val,
                           bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
 
-        # Temperature display area (large)
-        temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
-        temp_display_area.grid(row=0, column=0, sticky="nsew")
-        temp_display_area.grid_rowconfigure(0, weight=1)
-        temp_display_area.grid_columnconfigure(0, weight=1)
+        # ===== TRANSMITTER 1 PANEL =====
+        tx1_panel = tk.Frame(self.main_container, bg="#ffffff", relief="solid", borderwidth=1)
+        tx1_panel.grid(row=0, column=0, sticky="nsew", padx=(5, 2), pady=5)
+        tx1_panel.grid_rowconfigure(1, weight=1)
+        tx1_panel.grid_columnconfigure(0, weight=1)
+        self._build_tx_panel(tx1_panel, controller, tx_index=1)
+
+        # ===== TRANSMITTER 2 PANEL =====
+        tx2_panel = tk.Frame(self.main_container, bg="#ffffff", relief="solid", borderwidth=1)
+        tx2_panel.grid(row=0, column=1, sticky="nsew", padx=(2, 5), pady=5)
+        tx2_panel.grid_rowconfigure(1, weight=1)
+        tx2_panel.grid_columnconfigure(0, weight=1)
+        self._build_tx_panel(tx2_panel, controller, tx_index=2)
+
+        footer = tk.Frame(self, bg="#e6e6e6", height=10)
+        footer.grid(row=3, column=0, sticky="nsew", padx=0, pady=0)
+        footer.grid_propagate(False)
         
-        # Centered temperature section
-        center_frame = tk.Frame(temp_display_area, bg="#ffffff")
-        center_frame.grid(row=0, column=0, sticky="nsew")
-        center_frame.grid_rowconfigure(0, weight=0)
-    
-        center_frame.grid_rowconfigure(1, weight=0)
-        center_frame.grid_rowconfigure(2, weight=0)
-        #center_frame.grid_rowconfigure(3, weight=0)
-        center_frame.grid_columnconfigure(0, weight=1)
+    def _build_tx_panel(self, parent, controller, tx_index):
+        """Build a single transmitter display panel (tx_index=1 or 2)."""
+        is_tx1 = (tx_index == 1)
+        thermo_var = controller.thermo_val if is_tx1 else controller.thermo_val2
+        rtd_var = controller.rtd_temp if is_tx1 else controller.rtd_temp2
+        current_var = controller.current_temp if is_tx1 else controller.current_temp2
+        rssi_var = controller.rssi_val if is_tx1 else controller.rssi_val2
+        tx_id_var = controller.transmitter_id_val if is_tx1 else controller.transmitter_id_val2
+        label_color = "#d40000" if is_tx1 else "#0055aa"
+        title = f"TRANSMITTER {tx_index}"
 
-        tk.Label(center_frame, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff",
-             font=("Arial", 18, "bold")).grid(row=0, column=0, pady=(20, 10))
+        parent.grid_rowconfigure(0, weight=0)  # title
+        parent.grid_rowconfigure(1, weight=1)  # temp display
+        parent.grid_rowconfigure(2, weight=0)  # alerts
+        parent.grid_rowconfigure(3, weight=0)  # sensor data
+        parent.grid_rowconfigure(4, weight=0)  # footer buttons
+        parent.grid_columnconfigure(0, weight=1)
 
-        temp_box = tk.Frame(center_frame, bg="#d40000",width=700, height=180)
-        temp_box.grid(row=1, column=0, pady=10, padx=20)
+        # --- Title bar ---
+        title_bar = tk.Frame(parent, bg=label_color, height=40)
+        title_bar.grid(row=0, column=0, sticky="ew")
+        title_bar.grid_propagate(False)
+        tk.Label(title_bar, text=title, fg="#ffffff", bg=label_color,
+                 font=("Arial", 14, "bold")).pack(side="left", padx=10, pady=8)
+        tk.Label(title_bar, textvariable=tx_id_var, fg="#ffffff", bg=label_color,
+                 font=("Arial", 11)).pack(side="right", padx=10, pady=8)
+
+        # --- Temperature display ---
+        temp_area = tk.Frame(parent, bg="#ffffff")
+        temp_area.grid(row=1, column=0, sticky="nsew", pady=(5, 0))
+        temp_area.grid_rowconfigure(0, weight=1)
+        temp_area.grid_columnconfigure(0, weight=1)
+
+        center = tk.Frame(temp_area, bg="#ffffff")
+        center.grid(row=0, column=0, sticky="nsew")
+        center.grid_columnconfigure(0, weight=1)
+
+        tk.Label(center, text="MELT TEMPERATURE", fg="#333333", bg="#ffffff",
+                 font=("Arial", 14, "bold")).grid(row=0, column=0, pady=(10, 5))
+
+        temp_box = tk.Frame(center, bg=label_color, height=130)
+        temp_box.grid(row=1, column=0, pady=5, padx=15, sticky="ew")
         temp_box.pack_propagate(False)
+        tk.Label(temp_box, textvariable=thermo_var, bg=label_color, fg="#ffffff",
+                 font=("Arial", 70, "bold"), padx=10, pady=10).pack(expand=True)
 
-        tk.Label(temp_box, textvariable=controller.thermo_val, bg="#d40000", fg="#ffffff",
-             font=("Arial", 90, "bold"), padx=20, pady=15).pack()
+        tk.Label(center, text="°C", fg="#333333", bg="#ffffff",
+                 font=("Arial", 18, "bold")).grid(row=2, column=0, pady=(0, 5))
 
-        # Temperature unit
-        tk.Label(center_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 24, "bold")).grid(row=2, column=0, pady=(0, 10))
-        
-        # Bottom container for alerts and sensor data
-        self.bottom_container = tk.Frame(self, bg="#ffffff")
-        self.bottom_container.grid(row=2, column=0, sticky="ew", padx=0, pady=0)
-        self.bottom_container.grid_rowconfigure(0, weight=0)
-        self.bottom_container.grid_rowconfigure(1, weight=0)
-        self.bottom_container.grid_columnconfigure(0, weight=1)
-        
-        alert_boxes_frame = tk.Frame(self.bottom_container, bg="#ffffff")
-        alert_boxes_frame.grid(row=0, column=0, sticky="ew", pady=15, padx=20)
-        alert_boxes_frame.grid_columnconfigure(0, weight=1)
-        alert_boxes_frame.grid_columnconfigure(1, weight=1)
-        alert_boxes_frame.grid_columnconfigure(2, weight=1)
-        
-        # Initialize alert tracking
-        self.active_alerts = {
-            "BATTERY": [],
-            "THERMOCOUPLE": [],
-            "RTD": []
-        }
-        
-        # ==================== BATTERY ALERT BOX ====================
-        self.battery_alert_box = tk.Frame(alert_boxes_frame, bg="#ffffff", relief="solid", borderwidth=2)
-        self.battery_alert_box.grid(row=0, column=0, sticky="ew", padx=5)
-        
-        
-        tk.Label(self.battery_alert_box, text="🔴 BATTERY", fg="#000000", bg="#ffffff",
-                font=("Arial", 16, "bold")).pack(pady=(8, 5))
-        
-        self.battery_alert_label = tk.Label(self.battery_alert_box, text="Battery Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 24, "bold"))
-        self.battery_alert_label.pack(pady=(8, 10))
-        
-        # ==================== THERMOCOUPLE ALERT BOX ====================
-        self.tc_alert_box = tk.Frame(alert_boxes_frame, bg="#ffffff", relief="solid", borderwidth=2)
-        self.tc_alert_box.grid(row=0, column=1, sticky="ew", padx=5)
-        
-        
-        tk.Label(self.tc_alert_box, text="🔴 THERMOCOUPLE", fg="#000000", bg="#ffffff",
-                font=("Arial", 16, "bold")).pack(pady=(8, 5))
-        
-        self.tc_alert_label = tk.Label(self.tc_alert_box, text="Thermocouple Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 24, "bold"))
-        self.tc_alert_label.pack(pady=(8, 10))
-        
-        # ==================== RTD ALERT BOX ====================
-        self.rtd_alert_box = tk.Frame(alert_boxes_frame, bg="#ffffff", relief="solid", borderwidth=2)
-        self.rtd_alert_box.grid(row=0, column=2, sticky="ew", padx=8)
-        
-        
-        tk.Label(self.rtd_alert_box, text="🔴 RTD", fg="#000000", bg="#ffffff",
-                font=("Arial", 16, "bold")).pack(pady=(8, 5))
-        
-        self.rtd_alert_label = tk.Label(self.rtd_alert_box, text="RTD Normal", fg="#006600", bg="#ffffff",
-                font=("Arial", 24, "bold"))
-        self.rtd_alert_label.pack(pady=(8, 10))
+        # --- Alert boxes ---
+        alert_frame = tk.Frame(parent, bg="#ffffff")
+        alert_frame.grid(row=2, column=0, sticky="ew", pady=5, padx=8)
+        alert_frame.grid_columnconfigure(0, weight=1)
+        alert_frame.grid_columnconfigure(1, weight=1)
+        alert_frame.grid_columnconfigure(2, weight=1)
 
-        # Sensor data grid (RTD, Thermocouple, RSSI)
-        sensor_frame = tk.Frame(self.bottom_container, bg="#ffffff")
-        sensor_frame.grid(row=1, column=0, sticky="ew", pady=20, padx=20)
+        if is_tx1:
+            self.active_alerts = {"BATTERY": [], "THERMOCOUPLE": [], "RTD": []}
+            self.battery_alert_box = tk.Frame(alert_frame, bg="#ffffff", relief="solid", borderwidth=2)
+            self.battery_alert_box.grid(row=0, column=0, sticky="ew", padx=3)
+            tk.Label(self.battery_alert_box, text="🔴 BATTERY", fg="#000000", bg="#ffffff",
+                     font=("Arial", 11, "bold")).pack(pady=(5, 3))
+            self.battery_alert_label = tk.Label(self.battery_alert_box, text="Normal", fg="#006600",
+                     bg="#ffffff", font=("Arial", 16, "bold"))
+            self.battery_alert_label.pack(pady=(3, 6))
+
+            self.tc_alert_box = tk.Frame(alert_frame, bg="#ffffff", relief="solid", borderwidth=2)
+            self.tc_alert_box.grid(row=0, column=1, sticky="ew", padx=3)
+            tk.Label(self.tc_alert_box, text="🔴 THERMOCOUPLE", fg="#000000", bg="#ffffff",
+                     font=("Arial", 11, "bold")).pack(pady=(5, 3))
+            self.tc_alert_label = tk.Label(self.tc_alert_box, text="Normal", fg="#006600",
+                     bg="#ffffff", font=("Arial", 16, "bold"))
+            self.tc_alert_label.pack(pady=(3, 6))
+
+            self.rtd_alert_box = tk.Frame(alert_frame, bg="#ffffff", relief="solid", borderwidth=2)
+            self.rtd_alert_box.grid(row=0, column=2, sticky="ew", padx=3)
+            tk.Label(self.rtd_alert_box, text="🔴 RTD", fg="#000000", bg="#ffffff",
+                     font=("Arial", 11, "bold")).pack(pady=(5, 3))
+            self.rtd_alert_label = tk.Label(self.rtd_alert_box, text="Normal", fg="#006600",
+                     bg="#ffffff", font=("Arial", 16, "bold"))
+            self.rtd_alert_label.pack(pady=(3, 6))
+        else:
+            self.active_alerts2 = {"BATTERY": [], "THERMOCOUPLE": [], "RTD": []}
+            self.battery_alert_box2 = tk.Frame(alert_frame, bg="#ffffff", relief="solid", borderwidth=2)
+            self.battery_alert_box2.grid(row=0, column=0, sticky="ew", padx=3)
+            tk.Label(self.battery_alert_box2, text="🔴 BATTERY", fg="#000000", bg="#ffffff",
+                     font=("Arial", 11, "bold")).pack(pady=(5, 3))
+            self.battery_alert_label2 = tk.Label(self.battery_alert_box2, text="Normal", fg="#006600",
+                     bg="#ffffff", font=("Arial", 16, "bold"))
+            self.battery_alert_label2.pack(pady=(3, 6))
+
+            self.tc_alert_box2 = tk.Frame(alert_frame, bg="#ffffff", relief="solid", borderwidth=2)
+            self.tc_alert_box2.grid(row=0, column=1, sticky="ew", padx=3)
+            tk.Label(self.tc_alert_box2, text="🔴 THERMOCOUPLE", fg="#000000", bg="#ffffff",
+                     font=("Arial", 11, "bold")).pack(pady=(5, 3))
+            self.tc_alert_label2 = tk.Label(self.tc_alert_box2, text="Normal", fg="#006600",
+                     bg="#ffffff", font=("Arial", 16, "bold"))
+            self.tc_alert_label2.pack(pady=(3, 6))
+
+            self.rtd_alert_box2 = tk.Frame(alert_frame, bg="#ffffff", relief="solid", borderwidth=2)
+            self.rtd_alert_box2.grid(row=0, column=2, sticky="ew", padx=3)
+            tk.Label(self.rtd_alert_box2, text="🔴 RTD", fg="#000000", bg="#ffffff",
+                     font=("Arial", 11, "bold")).pack(pady=(5, 3))
+            self.rtd_alert_label2 = tk.Label(self.rtd_alert_box2, text="Normal", fg="#006600",
+                     bg="#ffffff", font=("Arial", 16, "bold"))
+            self.rtd_alert_label2.pack(pady=(3, 6))
+
+        # --- Sensor data row ---
+        sensor_frame = tk.Frame(parent, bg="#ffffff")
+        sensor_frame.grid(row=3, column=0, sticky="ew", pady=5, padx=8)
         sensor_frame.grid_columnconfigure(0, weight=1)
         sensor_frame.grid_columnconfigure(1, weight=1)
         sensor_frame.grid_columnconfigure(2, weight=1)
 
-        # RTD sensor
-        rtd_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        rtd_frame.grid(row=0, column=0, sticky="ew", padx=10)
-        tk.Label(rtd_frame, text="RTD TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 10, "bold")).pack()
-        tk.Label(rtd_frame, textvariable=controller.rtd_temp, fg="#0066cc", bg="#ffffff",
-            font=("Arial", 24, "bold")).pack(pady=8)
-        tk.Label(rtd_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 12)).pack()
+        rtd_f = tk.Frame(sensor_frame, bg="#ffffff")
+        rtd_f.grid(row=0, column=0, sticky="ew", padx=5)
+        tk.Label(rtd_f, text="RTD TEMP", fg="#333333", bg="#ffffff", font=("Arial", 9, "bold")).pack()
+        tk.Label(rtd_f, textvariable=rtd_var, fg="#0066cc", bg="#ffffff", font=("Arial", 18, "bold")).pack(pady=4)
+        tk.Label(rtd_f, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 10)).pack()
 
-        # DEVICE temperature sensor
-        temp_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        temp_frame.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(temp_frame, text="DEVICE TEMPERATURE", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack(anchor='e')
-        tk.Label(temp_frame, textvariable=controller.current_temp, fg="#d40000", bg="#ffffff",
-             font=("Arial", 28, "bold")).pack(pady=10, anchor='e')
-        tk.Label(temp_frame, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 14)).pack(anchor='e')
-        
-        # RSSI sensor
-        rssi_frame = tk.Frame(sensor_frame, bg="#ffffff")
-        rssi_frame.grid(row=0, column=2, sticky="ew", padx=10)
-        tk.Label(rssi_frame, text="RSSI", fg="#333333", bg="#ffffff", font=("Arial", 11, "bold")).pack()
-        tk.Label(rssi_frame, textvariable=controller.rssi_val, fg="#0066cc", bg="#ffffff",
-            font=("Arial", 24, "bold")).pack(pady=8)
-        tk.Label(rssi_frame, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 12)).pack()
-        footer = tk.Frame(self, bg="#e6e6e6", height=70)
-        footer.grid(row=3, column=0, sticky="nsew", padx=0, pady=0)
-        footer.grid_propagate(False)
-        
-         # Settings button (right)
-        tk.Button(footer, text="⚙ PAIR DEVICE", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
-                 width=20, command=self.check_password).pack(side="right", padx=20, pady=12)
-         
-        # ⚙ CONFIGURATION Button - WITH PASSWORD (NEW)
-        tk.Button(footer, text="⚙ CONFIGURATION", bg="#cccccc", fg="black", font=("Arial", 11, "bold"),
-                 width=20, command=self.check_configuration_password).pack(side="right", padx=20, pady=12)
-        
+        dev_f = tk.Frame(sensor_frame, bg="#ffffff")
+        dev_f.grid(row=0, column=1, sticky="ew", padx=5)
+        tk.Label(dev_f, text="DEVICE TEMP", fg="#333333", bg="#ffffff", font=("Arial", 9, "bold")).pack()
+        tk.Label(dev_f, textvariable=current_var, fg=label_color, bg="#ffffff", font=("Arial", 18, "bold")).pack(pady=4)
+        tk.Label(dev_f, text="°C", fg="#333333", bg="#ffffff", font=("Arial", 10)).pack()
+
+        rssi_f = tk.Frame(sensor_frame, bg="#ffffff")
+        rssi_f.grid(row=0, column=2, sticky="ew", padx=5)
+        tk.Label(rssi_f, text="RSSI", fg="#333333", bg="#ffffff", font=("Arial", 9, "bold")).pack()
+        tk.Label(rssi_f, textvariable=rssi_var, fg="#0066cc", bg="#ffffff", font=("Arial", 18, "bold")).pack(pady=4)
+        tk.Label(rssi_f, text="dBm", fg="#333333", bg="#ffffff", font=("Arial", 10)).pack()
+
+        # --- Footer buttons ---
+        btn_frame = tk.Frame(parent, bg="#e6e6e6", height=55)
+        btn_frame.grid(row=4, column=0, sticky="ew")
+        btn_frame.grid_propagate(False)
+
+        if is_tx1:
+            tk.Button(btn_frame, text="⚙ PAIR DEVICE", bg="#cccccc", fg="black",
+                      font=("Arial", 10, "bold"), width=18,
+                      command=self.check_password).pack(side="left", padx=8, pady=10)
+            tk.Button(btn_frame, text="⚙ CONFIGURATION", bg="#cccccc", fg="black",
+                      font=("Arial", 10, "bold"), width=18,
+                      command=self.check_configuration_password).pack(side="left", padx=8, pady=10)
+        else:
+            tk.Button(btn_frame, text="⚙ PAIR DEVICE", bg="#cccccc", fg="black",
+                      font=("Arial", 10, "bold"), width=18,
+                      command=self.check_password2).pack(side="left", padx=8, pady=10)
+            tk.Button(btn_frame, text="⚙ CONFIGURATION", bg="#cccccc", fg="black",
+                      font=("Arial", 10, "bold"), width=18,
+                      command=self.check_configuration_password).pack(side="left", padx=8, pady=10)
+
     def check_paired_device_password(self):
         """Check password for Paired Device button"""
         password = simpledialog.askstring("Security", "Enter Password for Paired Device:", show='*')
@@ -1590,7 +1657,6 @@ class DashboardFrame(tk.Frame):
 
     def refresh_layout(self):
         """Toggle between digital and graph view depending on controller setting"""
-        # hide both
         try:
             self.main_container.grid_forget()
         except Exception:
@@ -1599,18 +1665,12 @@ class DashboardFrame(tk.Frame):
             self.graph_frame.grid_forget()
         except Exception:
             pass
-        try:
-            self.bottom_container.grid_forget()
-        except Exception:
-            pass
         self.lbl_graph_overlay.place_forget()
         if self.controller.view_mode.get() == "Digital View":
             self.main_container.grid(row=1, column=0, sticky="nsew")
-            self.bottom_container.grid(row=2, column=0, sticky="ew")
         else:
             self.graph_frame.grid(row=1, column=0, sticky="nsew")
             self.lbl_graph_overlay.place(relx=0.95, rely=0.05, anchor="ne")
-            self.bottom_container.grid(row=2, column=0, sticky="ew")
             self.update_graph()
 
     def update_graph(self):
@@ -1729,7 +1789,7 @@ class DashboardFrame(tk.Frame):
     
 
     def _read_data(self):
-        """Read from serial port"""
+        """Read from serial port (TX1)"""
         if not self.controller.is_reading or not self.controller.port_manager.is_open:
             return
         
@@ -1738,156 +1798,145 @@ class DashboardFrame(tk.Frame):
             if data:
                 packet = self.controller.packet_processor.process_byte(data)
                 if packet:
-                    self._process_data(packet)
+                    self._process_data(packet, tx_index=1)
         except Exception as e:
-            logger.warning(f"Read error: {e}")
+            logger.warning(f"Read error TX1: {e}")
         
         if self.controller.is_reading:
             self.after(20, self._read_data)
 
-    def _process_data(self, packet):
-        """Process sensor data and update UI"""
+    def _read_data2(self):
+        """Read from serial port (TX2)"""
+        if not self.controller.is_reading2 or not self.controller.port_manager2.is_open:
+            return
+        
+        try:
+            data = self.controller.port_manager2.read_byte()
+            if data:
+                packet = self.controller.packet_processor2.process_byte(data)
+                if packet:
+                    self._process_data(packet, tx_index=2)
+        except Exception as e:
+            logger.warning(f"Read error TX2: {e}")
+        
+        if self.controller.is_reading2:
+            self.after(20, self._read_data2)
+
+    def _process_data(self, packet, tx_index=1):
+        """Process sensor data and update UI for the given transmitter (1 or 2)."""
+        is_tx1 = (tx_index == 1)
+        ctrl = self.controller
+        rtd_comp = ctrl.apply_rtd_compensation.get() if is_tx1 else ctrl.apply_rtd_compensation2.get()
 
     # -------- PARSE DATA --------
         try:
-           data = self.controller.data_parser.parse_packet(
-               packet,
-               enable_rtd_compensation=self.controller.apply_rtd_compensation.get()
-           )
-           # Update all main UI labels with parsed values (including raw)
-           # Device temperature
+           data = ctrl.data_parser.parse_packet(packet, enable_rtd_compensation=rtd_comp)
+
+           # Route parsed values to the correct StringVars
+           if is_tx1:
+               _current_temp = ctrl.current_temp
+               _thermo_val = ctrl.thermo_val
+               _rtd_temp = ctrl.rtd_temp
+               _battery_val = ctrl.battery_val
+               _rssi_val = ctrl.rssi_val
+               _bat_voltage = ctrl.bat_voltage
+               _raw_hex = ctrl.raw_hex
+               _tx_id_val = ctrl.transmitter_id_val
+           else:
+               _current_temp = ctrl.current_temp2
+               _thermo_val = ctrl.thermo_val2
+               _rtd_temp = ctrl.rtd_temp2
+               _battery_val = ctrl.battery_val2
+               _rssi_val = ctrl.rssi_val2
+               _bat_voltage = ctrl.bat_voltage2
+               _raw_hex = ctrl.raw_hex2
+               _tx_id_val = ctrl.transmitter_id_val2
+
            device_temp = getattr(data, "temperature", None)
-           if device_temp is not None:
-               self.controller.current_temp.set(f"{device_temp:.1f}")
-           else:
-               self.controller.current_temp.set("--")
+           _current_temp.set(f"{device_temp:.1f}" if device_temp is not None else "--")
 
-           # RTD temperature
            rtd_temp = getattr(data, "rtd_temperature", None)
-           if rtd_temp is not None:
-               self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
-           else:
-               self.controller.rtd_temp.set("--")
+           _rtd_temp.set(f"{rtd_temp:.1f}" if rtd_temp is not None else "--")
 
-           # RTD resistance
            rtd_res = getattr(data, "rtd_resistance", None)
-           if rtd_res is not None:
-               self.controller.rtd_resistance = f"{rtd_res:.2f} Ω"
-           else:
-               self.controller.rtd_resistance = "--"
+           if is_tx1:
+               ctrl.rtd_resistance = f"{rtd_res:.2f} Ω" if rtd_res is not None else "--"
 
-           # Thermocouple temperature
            tc = getattr(data, "thermocouple", None)
-           if tc is not None:
-               self.controller.thermo_val.set(f"{tc:.1f}")
-           else:
-               self.controller.thermo_val.set("--")
+           _thermo_val.set(f"{tc:.1f}" if tc is not None else "--")
 
-           # Thermocouple voltage (uV)
            tc_uv = getattr(data, "thermocouple_voltage_uv", None)
-           if tc_uv is not None:
-               self.controller.tc_uv = f"{tc_uv:.0f} µV"
-           else:
-               self.controller.tc_uv = "--"
+           if is_tx1:
+               ctrl.tc_uv = f"{tc_uv:.0f} µV" if tc_uv is not None else "--"
 
-           # Battery voltage
            batt = getattr(data, "battery_voltage", None)
            if batt is not None:
-               self.controller.battery_val.set(f"{batt:.2f}V")
-               self.controller.bat_voltage.set(f"{batt:.2f}V")
+               _battery_val.set(f"{batt:.2f}V")
+               _bat_voltage.set(f"{batt:.2f}V")
            else:
-               self.controller.battery_val.set("--")
-               self.controller.bat_voltage.set("--")
+               _battery_val.set("--")
+               _bat_voltage.set("--")
 
-           # RSSI
            rssi = getattr(data, "rssi", None)
            if rssi is not None:
                try:
-                   self.controller.rssi_val.set(f"{float(rssi):.0f} dBm")
+                   _rssi_val.set(f"{float(rssi):.0f} dBm")
                except Exception:
-                   self.controller.rssi_val.set(str(rssi))
+                   _rssi_val.set(str(rssi))
            else:
-               if self.controller.rssi_val.get() == "":
-                   self.controller.rssi_val.set("--")
+               if _rssi_val.get() == "":
+                   _rssi_val.set("--")
 
-           # Device ID
            dev_id = getattr(data, "device_id", None)
            if dev_id is not None:
-               self.controller.transmitter_id_val.set(str(dev_id))
+               _tx_id_val.set(str(dev_id))
 
-           # Raw packet
            raw_packet = getattr(data, "raw_packet", None)
-           if raw_packet:
-               self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
-           else:
-               self.controller.raw_hex.set("--")
-        except Exception as exc:
-           logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {exc}", exc_info=True)
-           return   # Exit only if parsing completely fails
-        
-        # ===============================
-# TRANSMITTER DISCOVERY & FILTERING
-# ===============================
-        tx_id = getattr(data, "device_id", None)
-        
-        try:
-           conn = getattr(self, "connection_window", None)
+           _raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet) if raw_packet else "--")
 
+        except Exception as exc:
+           logger.error(f"Error parsing packet TX{tx_index}: {exc}", exc_info=True)
+           return
+
+        # ===============================
+        # TRANSMITTER DISCOVERY & FILTERING
+        # ===============================
+        tx_id = getattr(data, "device_id", None)
+        conn_attr = "connection_window" if is_tx1 else "connection_window2"
+        conn = getattr(self, conn_attr, None)
+
+        try:
            if conn and tx_id:
             tx_id = str(tx_id)
-
-            # Check if connection window is still valid (not destroyed)
             try:
                 conn.winfo_exists()
             except tk.TclError:
                 conn = None
 
             if conn and conn.winfo_exists():
-              # Add to list if new
               if tx_id not in conn.tx_ids:
                 conn.tx_ids.append(tx_id)
                 try:
                     conn.tx_combo["values"] = conn.tx_ids
                 except tk.TclError:
-                    logger.warning("tx_combo widget no longer exists")
-                #logger.info(f"Discovered new transmitter: {tx_id}")
+                    pass
 
-              # Auto-select first TX
               if len(conn.tx_ids) == 1:
                 try:
                     conn.tx_combo.current(0)
                     conn.selected_tx = tx_id
-                    self.controller.transmitter_id_val.set(tx_id)
-                    logger.info(f"Auto-selected first transmitter: {tx_id}")
+                    _tx_id_val.set(tx_id)
                 except tk.TclError:
-                    logger.warning("Cannot update tx_combo - window may have closed")
                     conn.selected_tx = tx_id
-                    self.controller.transmitter_id_val.set(tx_id)
-            else:
-              # Connection window closed, just store TX ID
-              if tx_id not in getattr(conn, "tx_ids", []):
-                if not hasattr(self, "_discovered_tx_ids"):
-                    self._discovered_tx_ids = []
-                if tx_id not in self._discovered_tx_ids:
-                    self._discovered_tx_ids.append(tx_id)
-                    logger.info(f"Discovered transmitter (offline): {tx_id}")
-                    # If dashboard has no transmitter selected yet, show this one
-                    cur = self.controller.transmitter_id_val.get()
-                    if not cur or cur in ("WAITING", "NOT PAIRED"):
-                        try:
-                            self.controller.transmitter_id_val.set(tx_id)
-                        except Exception:
-                            pass
+                    _tx_id_val.set(tx_id)
         except Exception as exc:
-           logger.warning(f"Error in transmitter discovery: {exc}", exc_info=True)
-        
+           logger.warning(f"Error in TX{tx_index} discovery: {exc}", exc_info=True)
+
         # ===============================
-# TRANSMITTER SELECTION FILTERING
-    #        ===============================
-        conn = getattr(self, "connection_window", None)
+        # TRANSMITTER SELECTION FILTERING
+        # ===============================
+        conn = getattr(self, conn_attr, None)
         selected_tx = None
-        
-        # Check if connection window exists and is valid
         if conn:
             try:
                 if conn.winfo_exists():
@@ -1896,44 +1945,30 @@ class DashboardFrame(tk.Frame):
                     conn = None
             except tk.TclError:
                 conn = None
-        
-        # If a transmitter is selected, only process its data
+
         if selected_tx and str(tx_id) != str(selected_tx):
-            logger.debug(f"Packet from {tx_id} ignored - only processing {selected_tx}")
             return
-        
-        # If no transmitter is selected yet, show the data anyway (useful during discovery)
-        #logger.info(f"Processing packet from TX: {tx_id} (selected: {selected_tx})")
-        
-        # -------- DEVICE TEMPERATURE --------
+
+        # -------- DEVICE TEMPERATURE (second pass after filter) --------
         device_temp = getattr(data, "temperature", None)
-        if device_temp is not None:
-           self.controller.current_temp.set(f"{device_temp:.1f}")
-        else:
-          self.controller.current_temp.set("--")
-    # -------- RTD TEMPERATURE --------
+        _current_temp.set(f"{device_temp:.1f}" if device_temp is not None else "--")
         rtd_temp = getattr(data, "rtd_temperature", None)
-        if rtd_temp is not None:
-          self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
-        else:
-          self.controller.rtd_temp.set("--")
+        _rtd_temp.set(f"{rtd_temp:.1f}" if rtd_temp is not None else "--")
 
         # --- log to database and update history/graph ---
-        # Use melt temperature (thermocouple) for graph instead of device temperature
         melt_temp = getattr(data, "thermocouple", None)
+        new_val = None
         if melt_temp is not None:
             try:
                 new_val = float(melt_temp)
             except Exception:
                 new_val = None
-        else:
-            new_val = None
 
         if new_val is not None:
-            self.controller.temp_data.append(new_val)
-            self.controller.time_data.append(datetime.now())
+            if is_tx1:
+                ctrl.temp_data.append(new_val)
+                ctrl.time_data.append(datetime.now())
 
-            # compute battery pct if voltage available
             bat_pct = None
             batt = getattr(data, "battery_voltage", None)
             if batt is not None:
@@ -1944,120 +1979,107 @@ class DashboardFrame(tk.Frame):
                 except Exception:
                     bat_pct = None
 
-            # pull raw values directly from the packet so we can log them
             pkt = data.raw_packet or packet
-            # device id string is already available in data.device_id
             dev_id = getattr(data, "device_id", "")
 
-            # reconstruct raw integers exactly as parser does
             temp_int = pkt[3]
             temp_int = (temp_int << 8) | pkt[2]
             temp_int = (temp_int << 8) | pkt[1]
             temp_int = (temp_int << 8) | pkt[0]
-
             rtd_int = pkt[11]
             rtd_int = (rtd_int << 8) | pkt[10]
-
             thermo_int = pkt[13]
             thermo_int = (thermo_int << 8) | pkt[12]
-
             batt_int = (pkt[15] << 8) | pkt[14]
-            
-        
-# WITH THIS:
-            station_name = self.controller.station_name.get() or "UNKNOWN"
+
+            station_name = ctrl.station_name.get() or "UNKNOWN"
             rssi_val = getattr(data, "rssi", 0) or 0
             try:
                rssi_int = int(float(str(rssi_val).replace(" dBm", "").strip()))
             except Exception:
                rssi_int = 0
 
-            self.controller.log_to_db(station_name,dev_id,temp_int,
-            rtd_int,thermo_int,batt_int,rssi_int
-        )
-            # Send packet to serial port
-            logger.debug(f"[DASHBOARD] Writing packet to output port: {pkt}")
-            self.controller.port_manager.write_byte(bytes(pkt))
+            ctrl.log_to_db(station_name, dev_id, temp_int, rtd_int, thermo_int, batt_int, rssi_int)
 
-            # Update graph if in graph view
-            if self.controller.view_mode.get() == "Graph View" and "DashboardFrame" in self.controller.frames:
-                self.controller.frames["DashboardFrame"].update_graph()
+            if is_tx1:
+                logger.debug(f"[DASHBOARD TX1] Writing packet to output port: {pkt}")
+                ctrl.port_manager.write_byte(bytes(pkt))
+
+                if ctrl.view_mode.get() == "Graph View" and "DashboardFrame" in ctrl.frames:
+                    ctrl.frames["DashboardFrame"].update_graph()
 
             ts = datetime.now().strftime("%H:%M:%S")
-            # history display still uses simplified string
-            self.controller.history_display.appendleft(
-                f"{ts} | Melt:{new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi}dBm"
+            ctrl.history_display.appendleft(
+                f"TX{tx_index} {ts} | Melt:{new_val}{ctrl.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
             )
-            if "DashboardFrame" in self.controller.frames:
+            if is_tx1 and "DashboardFrame" in ctrl.frames:
                 try:
-                    self.controller.frames["DashboardFrame"].update_graph()
+                    ctrl.frames["DashboardFrame"].update_graph()
                 except Exception:
                     pass
-                
-# 
-# Valid thermocouple temperature
+
         elif tc is not None:
-            self.tc_fifo.append(tc)
+            if is_tx1:
+                self.tc_fifo.append(tc)
+                if len(self.tc_fifo) > 10:
+                    self.tc_fifo.pop(0)
+                avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
+                _thermo_val.set(f"{avg_tc:.1f}")
 
-            if len(self.tc_fifo) > 10:
-                self.tc_fifo.pop(0)
-
-            avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
-            self.controller.thermo_val.set(f"{avg_tc:.1f}")
-
-        # Battery: accept battery_voltage (float) or battery_text
         batt = getattr(data, "battery_voltage", None)
-        if batt is None:
-            batt_text = getattr(data, "battery_text", None)
-            if batt_text:
-                m = re.search(r"(\d+(?:\.\d+)?)", str(batt_text))
-                if m:
-                    try:
-                        batt = float(m.group(1))
-                    except Exception:
-                        batt = None
-
         if batt is not None:
-            self.controller.battery_val.set(f"{batt:.2f}V")
-            # Also update diagnostic display
-            self.controller.bat_voltage.set(f"{batt:.2f}V")
+            _battery_val.set(f"{batt:.2f}V")
+            _bat_voltage.set(f"{batt:.2f}V")
         else:
-            self.controller.battery_val.set("--")
-            self.controller.bat_voltage.set("--")
+            _battery_val.set("--")
+            _bat_voltage.set("--")
 
-        # Update raw hex for diagnostics
         raw_packet = getattr(data, "raw_packet", None)
         if raw_packet:
-            self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
+            _raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
 
-        # RSSI
         rssi = getattr(data, "rssi", None)
         if rssi is not None:
             try:
-                self.controller.rssi_val.set(f"{float(rssi):.0f} dBm")
+                _rssi_val.set(f"{float(rssi):.0f} dBm")
             except Exception:
-                self.controller.rssi_val.set(str(rssi))
+                _rssi_val.set(str(rssi))
         else:
-            if self.controller.rssi_val.get() == "":
-                self.controller.rssi_val.set("--")
+            if _rssi_val.get() == "":
+                _rssi_val.set("--")
+
         try:
-            self._check_alerts(data)
+            self._check_alerts(data, tx_index=tx_index)
         except Exception as e:
-          print("Alert error:", e)
+            print(f"Alert error TX{tx_index}:", e)
         
     
-    def _check_alerts(self, data):
+    def _check_alerts(self, data, tx_index=1):
         """Check sensor data for alert conditions"""
+        is_tx1 = (tx_index == 1)
 
-        if not hasattr(self, 'battery_alert_label'):
-            return
-        
-        # Clear previous alerts
-        self.active_alerts = {
-            "BATTERY": [],
-            "THERMOCOUPLE": [],
-            "RTD": []
-        }
+        if is_tx1:
+            if not hasattr(self, 'battery_alert_label'):
+                return
+            battery_alert_box = self.battery_alert_box
+            battery_alert_label = self.battery_alert_label
+            tc_alert_box = self.tc_alert_box
+            tc_alert_label = self.tc_alert_label
+            rtd_alert_box = self.rtd_alert_box
+            rtd_alert_label = self.rtd_alert_label
+            self.active_alerts = {"BATTERY": [], "THERMOCOUPLE": [], "RTD": []}
+            active_alerts = self.active_alerts
+        else:
+            if not hasattr(self, 'battery_alert_label2'):
+                return
+            battery_alert_box = self.battery_alert_box2
+            battery_alert_label = self.battery_alert_label2
+            tc_alert_box = self.tc_alert_box2
+            tc_alert_label = self.tc_alert_label2
+            rtd_alert_box = self.rtd_alert_box2
+            rtd_alert_label = self.rtd_alert_label2
+            self.active_alerts2 = {"BATTERY": [], "THERMOCOUPLE": [], "RTD": []}
+            active_alerts = self.active_alerts2
         
         # RTD resistance alerts
         rtd_resistance = getattr(data, "rtd_resistance", None)
@@ -2066,24 +2088,24 @@ class DashboardFrame(tk.Frame):
         
         if rtd_resistance is not None:
             if rtd_resistance < 100:
-                self.active_alerts["RTD"].append(("RTD under lower limit. May be short circuit", "red"))
+                active_alerts["RTD"].append(("RTD under lower limit. May be short circuit", "red"))
                 rtd_status = " Short Circuit"
                 rtd_color = "#d40000"
                 logger.warning(f"RTD SHORT CIRCUIT: {rtd_resistance}Ω")
             elif rtd_resistance > 390:
-                self.active_alerts["RTD"].append(("RTD over upper limit. May be RTD is melt and open", "red"))
+                active_alerts["RTD"].append(("RTD over upper limit. May be RTD is melt and open", "red"))
                 rtd_status = "Open Circuit"
                 rtd_color = "#d40000"
                 logger.warning(f"RTD OPEN CIRCUIT: {rtd_resistance}Ω")
         # Update RTD alert box
         try:
-            self.rtd_alert_label.config(text=rtd_status, fg=rtd_color)
-            if rtd_color == "#d40000":  # red alert
-                self.rtd_alert_box.config(bg=rtd_color)
-                self.rtd_alert_label.config(bg=rtd_color, fg="#ffffff")  # white text
+            rtd_alert_label.config(text=rtd_status, fg=rtd_color)
+            if rtd_color == "#d40000":
+                rtd_alert_box.config(bg=rtd_color)
+                rtd_alert_label.config(bg=rtd_color, fg="#ffffff")
             else:
-                self.rtd_alert_box.config(bg="#ffffff")
-                self.rtd_alert_label.config(bg="#ffffff", fg=rtd_color)
+                rtd_alert_box.config(bg="#ffffff")
+                rtd_alert_label.config(bg="#ffffff", fg=rtd_color)
         except:
             pass
         
@@ -2094,12 +2116,12 @@ class DashboardFrame(tk.Frame):
         
         if tc_voltage_uv is not None:
             if tc_voltage_uv < 100:
-                self.active_alerts["THERMOCOUPLE"].append(("Thermo couple temperature is under lower limit. May be short", "red"))
+                active_alerts["THERMOCOUPLE"].append(("Thermo couple temperature is under lower limit. May be short", "red"))
                 tc_status = " Short Circuit"
                 tc_color = "#d40000"
                 logger.warning(f"THERMOCOUPLE SHORT: {tc_voltage_uv}µV")
             elif tc_voltage_uv > 14000:
-                self.active_alerts["THERMOCOUPLE"].append(("Thermocouple is not connected or short", "red"))
+                active_alerts["THERMOCOUPLE"].append(("Thermocouple is not connected or short", "red"))
                 tc_status = " Not Connected"
                 tc_color = "#d40000"
                 logger.warning(f"THERMOCOUPLE NOT CONNECTED: {tc_voltage_uv}µV")
@@ -2109,13 +2131,13 @@ class DashboardFrame(tk.Frame):
         
         # Update Thermocouple alert box
         try:
-            self.tc_alert_label.config(text=tc_status, fg=tc_color)
-            if tc_color == "#d40000":  # red alert
-               self.tc_alert_box.config(bg=tc_color)
-               self.tc_alert_label.config(bg=tc_color, fg="#ffffff")
+            tc_alert_label.config(text=tc_status, fg=tc_color)
+            if tc_color == "#d40000":
+               tc_alert_box.config(bg=tc_color)
+               tc_alert_label.config(bg=tc_color, fg="#ffffff")
             else:
-               self.tc_alert_box.config(bg="#ffffff")
-               self.tc_alert_label.config(bg="#ffffff", fg=tc_color)
+               tc_alert_box.config(bg="#ffffff")
+               tc_alert_label.config(bg="#ffffff", fg=tc_color)
         except:
             pass
         
@@ -2126,29 +2148,29 @@ class DashboardFrame(tk.Frame):
         
         if battery_voltage is not None:
             if battery_voltage < 3.35:
-                self.active_alerts["BATTERY"].append(("Battery critically low - Charge immediately!", "red"))
+                active_alerts["BATTERY"].append(("Battery critically low - Charge immediately!", "red"))
                 battery_status = " Critical"
                 battery_color = "#d40000"
                 logger.error(f"BATTERY CRITICAL: {battery_voltage}V")
             elif battery_voltage < 3.6:
-                self.active_alerts["BATTERY"].append(("Battery low - Recharge soon", "yellow"))
+                active_alerts["BATTERY"].append(("Battery low - Recharge soon", "yellow"))
                 battery_status = " Low"
-                battery_color =  "#d40000"
+                battery_color = "#d40000"
                 logger.warning(f"BATTERY LOW: {battery_voltage}V")
         # Update Battery alert box
         try:
-            self.battery_alert_label.config(text=battery_status, fg=battery_color)
-            if battery_color == "#d40000":  # red alert
-              self.battery_alert_box.config(bg=battery_color)
-              self.battery_alert_label.config(bg=battery_color, fg="#ffffff")
+            battery_alert_label.config(text=battery_status, fg=battery_color)
+            if battery_color == "#d40000":
+              battery_alert_box.config(bg=battery_color)
+              battery_alert_label.config(bg=battery_color, fg="#ffffff")
             else:
-               self.battery_alert_box.config(bg="#ffffff")
-               self.battery_alert_label.config(bg="#ffffff", fg=battery_color)
+               battery_alert_box.config(bg="#ffffff")
+               battery_alert_label.config(bg="#ffffff", fg=battery_color)
         except:
             pass
         
         # Set overall status message
-        all_alerts = self.active_alerts["BATTERY"] + self.active_alerts["THERMOCOUPLE"] + self.active_alerts["RTD"]
+        all_alerts = active_alerts["BATTERY"] + active_alerts["THERMOCOUPLE"] + active_alerts["RTD"]
         if all_alerts:
             red_alerts = [alert for alert in all_alerts if alert[1] == "red"]
             if red_alerts:
@@ -2189,7 +2211,8 @@ class DashboardFrame(tk.Frame):
             self.connection_window = ConnectionSettings(
                 controller=self.controller,
                 dashboard=self,
-                is_connected=self.is_connected
+                is_connected=self.is_connected,
+                tx_index=1
             )
         except Exception as exc:
             logger.exception("Failed to open ConnectionSettings")
@@ -2198,28 +2221,61 @@ class DashboardFrame(tk.Frame):
                 f"Unable to open connection settings:\n{exc}"
             )
 
+    def check_password2(self):
+        """Open Connection Settings popup for TX2."""
+        try:
+            if hasattr(self, 'connection_window2') and self.connection_window2 is not None:
+                try:
+                    if self.connection_window2.winfo_exists():
+                        self.connection_window2.lift()
+                        self.connection_window2.focus_force()
+                        return
+                except Exception:
+                    pass
+            self.connection_window2 = ConnectionSettings(
+                controller=self.controller,
+                dashboard=self,
+                is_connected=self.is_connected2,
+                tx_index=2
+            )
+        except Exception as exc:
+            logger.exception("Failed to open ConnectionSettings TX2")
+            messagebox.showerror("Error", f"Unable to open connection settings:\n{exc}")
+
 class ConnectionSettings(tk.Toplevel):
     """COM Port Configuration Popup — opens immediately, requests password, enables controls on success."""
 
-    def __init__(self, controller, dashboard, is_connected=False):
+    def __init__(self, controller, dashboard, is_connected=False, tx_index=1):
         super().__init__(dashboard)
-        logger.info("Opening ConnectionSettings window")
+        logger.info(f"Opening ConnectionSettings window TX{tx_index}")
 
         self.controller = controller
         self.dashboard = dashboard
+        self.tx_index = tx_index
+        is_tx1 = (tx_index == 1)
+
+        # Point to the correct port manager and state vars
+        self._port_manager = controller.port_manager if is_tx1 else controller.port_manager2
+        self._packet_processor = controller.packet_processor if is_tx1 else controller.packet_processor2
+        self._tx_id_var = controller.transmitter_id_val if is_tx1 else controller.transmitter_id_val2
+        self._com_port_var = controller.com_port_val if is_tx1 else controller.com_port_val2
+        self._conn_window_attr = "connection_window" if is_tx1 else "connection_window2"
+        self._is_connected_attr = "is_connected" if is_tx1 else "is_connected2"
+        self._is_reading_attr = "is_reading" if is_tx1 else "is_reading2"
+        self._read_data_fn = dashboard._read_data if is_tx1 else dashboard._read_data2
+        self._conn_status_key = "connection_status" if is_tx1 else "connection_status2"
 
         # Track connection state
         self._is_connected = is_connected
 
-        self.title("Connection Settings")
-        self.state("zoomed")          # full screen like main window
+        self.title(f"Connection Settings - Transmitter {tx_index}")
+        self.state("zoomed")
         self.minsize(900, 600)
-
         self.configure(bg="#f0f0f0")
 
        
         # ---------- TITLE ----------
-        tk.Label(self,text="USB / COM Port Configuration",font=("Arial", 14, "bold"),bg="#f0f0f0"
+        tk.Label(self,text=f"USB / COM Port Configuration — Transmitter {tx_index}",font=("Arial", 14, "bold"),bg="#f0f0f0"
         ).pack(pady=15)
 
         frame = tk.Frame(self, bg="#f0f0f0")
@@ -2266,17 +2322,18 @@ class ConnectionSettings(tk.Toplevel):
         self.tx_ids = []
         self.selected_tx = None
         self._is_connected = False
-        self.dashboard.is_connected = False
+        setattr(self.dashboard, self._is_connected_attr, False)
 
         # If controller has discovered transmitters before opening this window, populate
-        if hasattr(self.controller, '_discovered_tx_ids') and self.controller._discovered_tx_ids:
+        discovered_attr = "_discovered_tx_ids" if is_tx1 else "_discovered_tx_ids2"
+        if hasattr(self.controller, discovered_attr) and getattr(self.controller, discovered_attr):
             try:
-                self.tx_ids = list(self.controller._discovered_tx_ids)
+                self.tx_ids = list(getattr(self.controller, discovered_attr))
                 self.tx_combo['values'] = self.tx_ids
                 if self.tx_ids:
                     self.tx_combo.current(0)
                     self.selected_tx = self.tx_ids[0]
-                    self.controller.transmitter_id_val.set(self.selected_tx)
+                    self._tx_id_var.set(self.selected_tx)
             except Exception:
                 pass
 
@@ -2306,29 +2363,16 @@ class ConnectionSettings(tk.Toplevel):
         self.destroy()
 
     def update_ports(self):
-        """Update available ports - show ALL ports including the currently connected one.
-    
-         This allows users to:
-         - See which port they're currently connected to
-         - Switch to a different port
-         - Reconnect to the same port if needed
-         """
-    # Get all available ports (do NOT exclude the connected port)
-        ports = self.controller.port_manager.get_available_ports(exclude_connected=False)
-    
+        """Update available ports."""
+        ports = self._port_manager.get_available_ports(exclude_connected=False)
         self.combo["values"] = ports if ports else []
-    
-    # Try to select the currently connected port if available
-        connected_port = self.controller.com_port_val.get()
+        connected_port = self._com_port_var.get()
         if connected_port and connected_port != "NOT CONNECTED":
            try:
-            # Find and select the connected port in the dropdown
                index = ports.index(connected_port) if ports else -1
                if index >= 0:
                   self.combo.current(index)
-                  #logger.info(f"Connection Settings: Currently connected to {connected_port}")
                else:
-                # Connected port not in list, select first available
                   if ports:
                      self.combo.current(0)
            except (ValueError, tk.TclError):
@@ -2338,14 +2382,11 @@ class ConnectionSettings(tk.Toplevel):
                 except Exception:
                     pass
         else:
-        # Not connected, select first available port
            if ports:
                try:
                   self.combo.current(0)
                except Exception:
                 pass
-    
-        #logger.info(f"Connection Settings: Showing {len(ports)} available ports (including connected)")
 
     def ask_password(self):
         """Prompt for password; enable controls only if correct."""
@@ -2362,8 +2403,7 @@ class ConnectionSettings(tk.Toplevel):
 
     def enable_controls(self):
         self.btn_refresh.config(state="normal")
-            # Always sync with dashboard connection state
-        self._is_connected = getattr(self.dashboard, 'is_connected', False)
+        self._is_connected = getattr(self.dashboard, self._is_connected_attr, False)
         if self._is_connected:
             self.btn_connect.config(state="disabled")
             self.btn_disconnect.config(state="normal")
@@ -2371,95 +2411,126 @@ class ConnectionSettings(tk.Toplevel):
             self.btn_connect.config(state="normal")
             self.btn_disconnect.config(state="disabled")
         self.status_label.config(text="Unlocked — you may connect", fg="green")
-        # refresh port list now that controls are enabled
         self.update_ports()
         self.restore_button_states()
 
     def restore_button_states(self):
         """Restore button states from saved connection status"""
-        # Read the saved state from controller
-        connection_status = getattr(self.controller, 'connection_status', 'disconnected')
-        
-        logger.info(f"[WINDOW REOPENED] Connection status from controller: {connection_status}")
-        
+        connection_status = getattr(self.controller, self._conn_status_key, 'disconnected')
         if connection_status == "connected":
-            # Was CONNECTED before - disable CONNECT, enable DISCONNECT
             self.btn_connect.config(state="disabled")
             self.btn_disconnect.config(state="normal")
             self.status_label.config(text="✓ Connected — ready to disconnect", fg="green")
-            logger.info("✓ Restored: CONNECT disabled, DISCONNECT enabled")
-            
-        else:  # "disconnected" or any other state
-            # Was DISCONNECTED - enable CONNECT, disable DISCONNECT
+        else:
             self.btn_connect.config(state="normal")
             self.btn_disconnect.config(state="disabled")
             self.status_label.config(text="Ready to connect", fg="black")
-            logger.info("✓ Restored: CONNECT enabled, DISCONNECT disabled")
 
     def connect(self):
-       logger.info("Connect button clicked")
+       logger.info(f"Connect button clicked TX{self.tx_index}")
        port = self.combo.get()
        if not port:
-          logger.warning("No port selected for connection")
           messagebox.showerror("Error", "Select a COM port", parent=self)
           return
 
-      # Disable connect, enable disconnect
        self.btn_connect.config(state="disabled")
        self.btn_disconnect.config(state="normal")
        self.dashboard.combo = self.combo
-    
-       logger.info(f"Connecting to {port}")
-    # ✅ ADD THIS LINE - Set the port immediately
-       self.controller.com_port_val.set(port)
-    
-       self.dashboard._open_port()
+
+       self._com_port_var.set(port)
+       self._open_port_for_tx()
        self._is_connected = True
-       self.dashboard.is_connected = True
-
-     # ✅ SAVE CONNECTION STATE to controller
-       self.controller.connection_status = "connected"
-       self.dashboard.is_connected = True
-    
+       setattr(self.dashboard, self._is_connected_attr, True)
+       setattr(self.controller, self._conn_status_key, "connected")
        self.status_label.config(text=f"✓ Connected to {port}", fg="green")
-       #logger.info(f"[CONNECT] Button state SAVED: connected")
     
 
+
+    def _open_port_for_tx(self):
+        """Open the selected port for this transmitter's port manager."""
+        port_name = self.combo.get()
+        if not port_name:
+            return
+        conn_window_ref = self
+
+        def _bg():
+            success, msg = self._port_manager.open_port(port_name)
+            if success:
+                self._com_port_var.set(port_name)
+                if self.tx_index == 1:
+                    self.controller.is_reading = True
+                    self.controller.is_paired.set(True)
+                    self.controller.serial = self._port_manager.serial
+                else:
+                    self.controller.is_reading2 = True
+                    self.controller.is_paired2.set(True)
+                setattr(self.dashboard, self._is_connected_attr, True)
+
+                def _ui():
+                    try:
+                        if conn_window_ref.winfo_exists():
+                            conn_window_ref.status_label.config(text=f"✓ Connected to {port_name}", fg="green")
+                    except Exception:
+                        pass
+                    self.dashboard.after(0, self._read_data_fn)
+                self.dashboard.after(0, _ui)
+            else:
+                def _ui_err():
+                    try:
+                        if conn_window_ref.winfo_exists():
+                            conn_window_ref.status_label.config(text=f"✗ Failed: {msg}", fg="red")
+                    except Exception:
+                        pass
+                self.dashboard.after(0, _ui_err)
+
+        import threading
+        threading.Thread(target=_bg, daemon=True).start()
 
     def on_tx_selected(self, event):
         """Handle transmitter ID selection change"""
         self.selected_tx = self.tx_combo.get()
-        self.controller.transmitter_id_val.set(self.selected_tx)
-        logger.info(f"Transmitter ID selected: {self.selected_tx}")
-        
-        # Clear UI data buffers when switching transmitters to avoid showing stale data
-        if hasattr(self.dashboard, 'tc_fifo'):
+        self._tx_id_var.set(self.selected_tx)
+        logger.info(f"TX{self.tx_index} ID selected: {self.selected_tx}")
+
+        if hasattr(self.dashboard, 'tc_fifo') and self.tx_index == 1:
             self.dashboard.tc_fifo.clear()
-        
-        # Reset temperature displays
-        self.controller.current_temp.set("--")
-        self.controller.rtd_temp.set("--")
-        self.controller.thermo_val.set("--")
-        self.controller.battery_val.set("--")
-        self.controller.rssi_val.set("--")
+
+        # Reset temperature displays for this TX
+        if self.tx_index == 1:
+            self.controller.current_temp.set("--")
+            self.controller.rtd_temp.set("--")
+            self.controller.thermo_val.set("--")
+            self.controller.battery_val.set("--")
+            self.controller.rssi_val.set("--")
+        else:
+            self.controller.current_temp2.set("--")
+            self.controller.rtd_temp2.set("--")
+            self.controller.thermo_val2.set("--")
+            self.controller.battery_val2.set("--")
+            self.controller.rssi_val2.set("--")
 
     def disconnect(self):
-       self.dashboard._close_port()
+       self._port_manager.close_port()
+       if self.tx_index == 1:
+           self.controller.is_reading = False
+           self.controller.is_paired.set(False)
+           self.controller.packet_processor.reset()
+           self.controller.serial = None
+       else:
+           self.controller.is_reading2 = False
+           self.controller.is_paired2.set(False)
+           self.controller.packet_processor2.reset()
 
-    # Enable connect, disable disconnect
-       self.controller.connection_status = "disconnected"
-       self.dashboard.is_connected = False
-    
-    # ✅ ADD THIS LINE - Clear the port value
-       self.controller.com_port_val.set("NOT CONNECTED")
-    
-    # After disconnect, update button states
+       setattr(self.controller, self._conn_status_key, "disconnected")
+       setattr(self.dashboard, self._is_connected_attr, False)
+       self._com_port_var.set("NOT CONNECTED")
+       self._tx_id_var.set("NOT PAIRED")
+
        self.btn_connect.config(state="normal")
        self.btn_disconnect.config(state="disabled")
        self.status_label.config(text="Disconnected — ready to connect", fg="black")
-    
+       messagebox.showinfo("Disconnected", f"Transmitter {self.tx_index} port closed")
 
-    # Clear TX dropdown
        self.tx_ids.clear()
        self.tx_combo["values"] = []
        self.selected_tx = None
