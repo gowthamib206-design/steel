@@ -1048,10 +1048,10 @@ class SensorGUI(tk.Tk):
         
         # Graph/History data variables
         self.buffer_size = 20
-        self.temp_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.temp_data = deque(maxlen=self.buffer_size)
         self.time_data = deque(maxlen=self.buffer_size)
         # TX2 graph buffers
-        self.temp_data2 = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.temp_data2 = deque(maxlen=self.buffer_size)
         self.time_data2 = deque(maxlen=self.buffer_size)
         self.history_display = deque(maxlen=30)
 
@@ -3580,9 +3580,7 @@ class SettingsFrame(tk.Frame):
         if password == "1111":
             self.exit_settings()
         elif password is not None:
-            messagebox.showerror("Access Denied", "Wrong Password")
-
-    
+            messagebox.showerror("Access Denied", "Wrong Password")  
     
 def main():
     """Main entry point"""
