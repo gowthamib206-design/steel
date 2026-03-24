@@ -3071,11 +3071,8 @@ class SettingsFrame(tk.Frame):
              font=("Arial", 12, "bold"), width=40, height=2,
              command=lambda: self.save_tab_settings("RTD Compensation")).pack(pady=10)
         
-       
         # Show first tab
         self.show_tab("General")
-        
-
 
     def save_tab_settings(self, tab_name):
         """Save settings for a specific tab"""
