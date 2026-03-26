@@ -44,14 +44,15 @@ class SensorGUI(tk.Tk):
         self.screen_h = self.winfo_screenheight()
         
         # Define responsive fonts
-        self.font_large_temp = ("Arial", int(self.screen_h * 0.06), "bold")
-        self.font_unit = ("Arial", int(self.screen_h * 0.02), "bold")
-        self.font_title = ("Arial", int(self.screen_h * 0.015), "bold")
-        self.font_normal = ("Arial", int(self.screen_h * 0.02), "bold")
-        self.font_small = ("Arial", int(self.screen_h * 0.01), "bold")
-        self.font_header = ("Arial", int(self.screen_h * 0.025), "bold")
-        self.font_device = ("Arial", int(self.screen_h * 0.015), "bold")
-        self.font_rssi = ("Arial", int(self.screen_h * 0.03), "bold")
+        self.font_large_temp = ("Arial", int(self.screen_h * 0.08), "bold")
+        self.font_unit = ("Arial", int(self.screen_h * 0.025), "bold")
+        self.font_title = ("Arial", int(self.screen_h * 0.012), "bold")
+        self.font_normal = ("Arial", int(self.screen_h * 0.015), "bold")
+        self.font_small = ("Arial", int(self.screen_h * 0.008), "bold")
+        self.font_header = ("Arial", int(self.screen_h * 0.02), "bold")
+        self.font_device = ("Arial", int(self.screen_h * 0.01), "bold")
+        self.font_rssi = ("Arial", int(self.screen_h * 0.012), "bold")
+        self.font_bold_small = ("Arial", int(self.screen_h * 0.01), "bold")
 
         # Load logo image
         self.logo_img = None
@@ -68,7 +69,7 @@ class SensorGUI(tk.Tk):
                 pass
             
             # Resize for display
-            pil_resized = pil_image.resize((int(self.screen_w * 0.026), int(self.screen_h * 0.035)), Image.Resampling.LANCZOS)
+            pil_resized = pil_image.resize((int(self.screen_w * 0.03), int(self.screen_h * 0.05)), Image.Resampling.LANCZOS)
             self.logo_img_small = ImageTk.PhotoImage(pil_resized)
         except Exception:
             pass
@@ -101,7 +102,7 @@ class SensorGUI(tk.Tk):
 
         # TX1 vars
         self.current_temp = tk.StringVar(value="--")
-        self.device_id_val = tk.StringVar(value="NOT PAIRED")
+        self.device_id_val = tk.StringVar(value="WAITING")
         self.thermo_val = tk.StringVar(value="--")
         self.rtd_temp = tk.StringVar(value="--")
         self.battery_val = tk.StringVar(value="--")
@@ -113,10 +114,11 @@ class SensorGUI(tk.Tk):
         self.transmitter_id_val = tk.StringVar(value="WAITING")
         self.raw_hex = tk.StringVar(value="--")
         self.bat_voltage = tk.StringVar(value="--")
+        self.bat_pct = tk.StringVar(value="--%")
 
         # TX2 vars
         self.current_temp2 = tk.StringVar(value="--")
-        self.device_id_val2 = tk.StringVar(value="NOT PAIRED")
+        self.device_id_val2 = tk.StringVar(value="WAITING")
         self.thermo_val2 = tk.StringVar(value="--")
         self.rtd_temp2 = tk.StringVar(value="--")
         self.battery_val2 = tk.StringVar(value="--")
@@ -128,6 +130,10 @@ class SensorGUI(tk.Tk):
         self.transmitter_id_val2 = tk.StringVar(value="WAITING")
         self.raw_hex2 = tk.StringVar(value="--")
         self.bat_voltage2 = tk.StringVar(value="--")
+        self.bat_pct2 = tk.StringVar(value="--%")
+
+        # Status text for header
+        self.tx_status_summary = tk.StringVar(value="WAITING TX1: WAITING TX2: WAITING")
 
         # Graph buffers
         self.buffer_size = 20
@@ -137,7 +143,7 @@ class SensorGUI(tk.Tk):
         self.time_data2 = deque(maxlen=self.buffer_size)
         
         # Trace updates
-        self.time_scale_str.trace_add('write', lambda *args: self.update_buffer_size())
+        self.time_scale_str.trace_add('write', self._on_buffer_update)
 
         self.container = tk.Frame(self, bg="#f0f0f0")
         self.container.pack(fill="both", expand=True)
@@ -152,13 +158,17 @@ class SensorGUI(tk.Tk):
         
         self.show_frame("DashboardFrame")
 
+    def _on_buffer_update(self, *args):
+        self.update_buffer_size()
+
     def show_frame(self, name):
         frame = self.frames[name]
         frame.tkraise()
-        if name == "DashboardFrame":
+        if hasattr(frame, "refresh_layout"):
             frame.refresh_layout()
-        elif name == "SettingsFrame":
+        if hasattr(frame, "refresh_active_tx_vars"):
             frame.refresh_active_tx_vars()
+        if hasattr(frame, "refresh_graph_view_row"):
             frame.refresh_graph_view_row()
 
     def update_buffer_size(self):
@@ -178,34 +188,63 @@ class DashboardFrame(tk.Frame):
         self.controller = controller
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
-        self.is_connected = False
-        self.is_connected2 = False
         
         # Header
-        header = tk.Frame(self, bg="#e6e6e6", height=int(self.controller.screen_h * 0.07))
+        header = tk.Frame(self, bg="#ffffff", height=int(self.controller.screen_h * 0.12))
         header.grid(row=0, column=0, sticky="nsew")
         header.grid_propagate(False)
         
-        if controller.logo_img_small:
-            tk.Label(header, image=controller.logo_img_small, bg="#e6e6e6").pack(side="left", padx=10)
+        # Left Header: Logo + Station Info
+        left_h = tk.Frame(header, bg="#ffffff")
+        left_h.pack(side="left", fill="y", padx=10, pady=5)
         
-        left_info = tk.Frame(header, bg="#e6e6e6")
-        left_info.pack(side="left", fill="y", padx=10, pady=5)
-        tk.Label(left_info, textvariable=controller.station_name, bg="#e6e6e6", font=controller.font_title).pack(anchor="w")
-        tk.Label(left_info, textvariable=controller.station_name2, bg="#e6e6e6", font=controller.font_title).pack(anchor="w")
+        if controller.logo_img_small:
+            tk.Label(left_h, image=controller.logo_img_small, bg="#ffffff").grid(row=0, column=0, rowspan=3, padx=5)
+        
+        tk.Label(left_h, textvariable=controller.station_name, bg="#ffffff", fg="#333333", font=("Arial", 12, "bold")).grid(row=0, column=1, sticky="w")
+        
+        status_line = tk.Frame(left_h, bg="#ffffff")
+        status_line.grid(row=1, column=1, sticky="w")
+        tk.Label(status_line, text="WAITING ", bg="#ffffff", fg="#333333", font=("Arial", 9, "bold")).pack(side="left")
+        tk.Label(status_line, text="TX1: ", bg="#ffffff", fg="#999999", font=("Arial", 9)).pack(side="left")
+        tk.Label(status_line, textvariable=controller.transmitter_id_val, bg="#ffffff", fg="#d40000", font=("Arial", 9, "bold")).pack(side="left")
+        tk.Label(status_line, text="  TX2: ", bg="#ffffff", fg="#999999", font=("Arial", 9)).pack(side="left")
+        tk.Label(status_line, textvariable=controller.transmitter_id_val2, bg="#ffffff", fg="#0055aa", font=("Arial", 9, "bold")).pack(side="left")
 
-        center_info = tk.Frame(header, bg="#e6e6e6")
-        center_info.pack(side="left", fill="both", expand=True)
-        self.lbl_time = tk.Label(center_info, text="", fg="#333333", bg="#e6e6e6", font=controller.font_header)
-        self.lbl_time.pack()
-        self.lbl_date = tk.Label(center_info, text="", fg="#666666", bg="#e6e6e6", font=controller.font_normal)
+        # Center Header: Time/Date
+        center_h = tk.Frame(header, bg="#ffffff")
+        center_h.pack(side="left", fill="both", expand=True)
+        self.lbl_time = tk.Label(center_h, text="", fg="#333333", bg="#ffffff", font=("Arial", 24, "bold"))
+        self.lbl_time.pack(pady=(15, 0))
+        self.lbl_date = tk.Label(center_h, text="", fg="#666666", bg="#ffffff", font=("Arial", 12))
         self.lbl_date.pack()
         self.update_clock()
 
-        right_info = tk.Frame(header, bg="#e6e6e6")
-        right_info.pack(side="right", padx=10)
-        self._create_header_stat(right_info, "TX1 BAT", controller.battery_val, "#d40000")
-        self._create_header_stat(right_info, "TX2 BAT", controller.battery_val2, "#0055aa")
+        # Right Header: RSSI / BAT Stats
+        right_h = tk.Frame(header, bg="#ffffff")
+        right_h.pack(side="right", padx=20, pady=10)
+        
+        # BAT header
+        tk.Label(right_h, text="BAT --%", bg="#ffffff", fg="#333333", font=("Arial", 22, "bold")).grid(row=0, column=1, sticky="e")
+        
+        # TX1 Right Info
+        tx1_info = tk.Frame(right_h, bg="#ffffff")
+        tx1_info.grid(row=1, column=1, sticky="e")
+        tk.Label(tx1_info, text="TX1", bg="#ffffff", fg="#d40000", font=("Arial", 8, "bold")).pack(side="right", padx=(5,0))
+        
+        tx1_stats = tk.Frame(right_h, bg="#ffffff")
+        tx1_stats.grid(row=2, column=1, sticky="e")
+        tk.Label(tx1_stats, text="RSSI --", bg="#ffffff", fg="#d40000", font=("Arial", 10, "bold")).pack(side="left")
+        
+        # TX2 Right Info
+        tx2_info = tk.Frame(right_h, bg="#ffffff")
+        tx2_info.grid(row=3, column=1, sticky="e")
+        tk.Label(tx2_info, text="TX2", bg="#ffffff", fg="#0055aa", font=("Arial", 8, "bold")).pack(side="right", padx=(5,0))
+        
+        tx2_stats = tk.Frame(right_h, bg="#ffffff")
+        tx2_stats.grid(row=4, column=1, sticky="e")
+        tk.Label(tx2_stats, text="BAT --", bg="#ffffff", fg="#333333", font=("Arial", 10, "bold")).pack(side="left")
+        tk.Label(tx2_stats, text="RSSI --", bg="#ffffff", fg="#0055aa", font=("Arial", 10, "bold")).pack(side="left", padx=(10,0))
 
         # Main Area
         self.main_container = tk.Frame(self, bg="#ffffff")
@@ -213,68 +252,94 @@ class DashboardFrame(tk.Frame):
         self.main_container.grid_columnconfigure(0, weight=1); self.main_container.grid_columnconfigure(1, weight=1)
         self.main_container.grid_rowconfigure(0, weight=1)
 
-        # Plot setups
-        self.fig1 = Figure(figsize=(5, 3), dpi=100); self.ax1 = self.fig1.add_subplot(111); self.line1, = self.ax1.plot([], [], 'r-')
-        self.fig2 = Figure(figsize=(5, 3), dpi=100); self.ax2 = self.fig2.add_subplot(111); self.line2, = self.ax2.plot([], [], 'b-')
-
         self.tx1_view = "Digital"; self.tx2_view = "Digital"
         
         self.tx1_panel = tk.Frame(self.main_container, bg="#ffffff", relief="solid", borderwidth=1)
-        self.tx1_panel.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.tx1_panel.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
         self._build_tx_panel(self.tx1_panel, 1)
 
         self.tx2_panel = tk.Frame(self.main_container, bg="#ffffff", relief="solid", borderwidth=1)
-        self.tx2_panel.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        self.tx2_panel.grid(row=0, column=1, sticky="nsew", padx=2, pady=2)
         self._build_tx_panel(self.tx2_panel, 2)
-
-    def _create_header_stat(self, parent, label, var, color):
-        f = tk.Frame(parent, bg="#e6e6e6")
-        f.pack(side="left", padx=10)
-        tk.Label(f, text=label, bg="#e6e6e6", font=("Arial", 8)).pack()
-        tk.Label(f, textvariable=var, bg="#e6e6e6", fg=color, font=("Arial", 12, "bold")).pack()
 
     def _build_tx_panel(self, parent, idx):
         is_tx1 = (idx == 1)
+        color = "#d40000" if is_tx1 else "#0055aa"
         parent.grid_rowconfigure(1, weight=1)
         parent.grid_columnconfigure(0, weight=1)
 
-        color = "#d40000" if is_tx1 else "#0055aa"
-        tk.Label(parent, text=f"TRANSMITTER {idx}", bg=color, fg="white", font=self.controller.font_header).grid(row=0, column=0, sticky="ew")
+        # Panel Header
+        p_header = tk.Frame(parent, bg=color, height=40)
+        p_header.grid(row=0, column=0, sticky="ew")
+        tk.Label(p_header, text=f"TRANSMITTER {idx}", bg=color, fg="white", font=("Arial", 16, "bold")).pack(side="left", padx=10)
+        tk.Label(p_header, textvariable=self.controller.transmitter_id_val if is_tx1 else self.controller.transmitter_id_val2, bg=color, fg="white", font=("Arial", 10)).pack(side="right", padx=10)
 
-        # Digital
-        df = tk.Frame(parent, bg="white")
-        df.grid(row=1, column=0, sticky="nsew")
-        tk.Label(df, text="MELT TEMPERATURE", bg="white", font=("Arial", 14)).pack(pady=(20, 0))
-        tb = tk.Frame(df, bg=color, height=120); tb.pack(fill="x", padx=20, pady=10); tb.pack_propagate(False)
-        tk.Label(tb, textvariable=self.controller.thermo_val if is_tx1 else self.controller.thermo_val2, bg=color, fg="white", font=("Arial", 60, "bold")).pack(expand=True)
-        tk.Label(df, text="°C", bg="white", font=("Arial", 20, "bold")).pack()
+        # Main Content
+        content = tk.Frame(parent, bg="white")
+        content.grid(row=1, column=0, sticky="nsew")
+        
+        # Digital View Frame
+        df = tk.Frame(content, bg="white")
+        df.pack(fill="both", expand=True)
+        
+        tk.Label(df, text="MELT TEMPERATURE", bg="white", fg="#333333", font=("Arial", 12, "bold")).pack(pady=(10, 5))
+        
+        # Large Value Background
+        val_bg = tk.Frame(df, bg=color, height=130)
+        val_bg.pack(fill="x", padx=15, pady=5)
+        val_bg.pack_propagate(False)
+        tk.Label(val_bg, textvariable=self.controller.thermo_val if is_tx1 else self.controller.thermo_val2, bg=color, fg="white", font=("Arial", 70, "bold")).pack(expand=True)
+        
+        tk.Label(df, text="°C", bg="white", fg="#333333", font=("Arial", 18, "bold")).pack()
 
-        # Graph
-        gf = tk.Frame(parent, bg="white")
-        canvas = FigureCanvasTkAgg(self.fig1 if is_tx1 else self.fig2, master=gf)
-        canvas.get_tk_widget().pack(fill="both", expand=True)
+        # Alert Boxes
+        alert_f = tk.Frame(df, bg="white")
+        alert_f.pack(fill="x", padx=10, pady=10)
+        alert_f.grid_columnconfigure(0, weight=1); alert_f.grid_columnconfigure(1, weight=1); alert_f.grid_columnconfigure(2, weight=1)
+        
+        self._create_alert_box(alert_f, "BATTERY", 0, idx)
+        self._create_alert_box(alert_f, "THERMOCOUPLE", 1, idx)
+        self._create_alert_box(alert_f, "RTD", 2, idx)
 
-        if is_tx1: self.tx1_digital_frame = df; self.tx1_graph_frame = gf; self.canvas1 = canvas
-        else: self.tx2_digital_frame = df; self.tx2_graph_frame = gf; self.canvas2 = canvas
+        # Values Row (RTD Temp, Device Temp, RSSI)
+        vals_f = tk.Frame(df, bg="white")
+        vals_f.pack(fill="x", padx=10, pady=10)
+        vals_f.grid_columnconfigure(0, weight=1); vals_f.grid_columnconfigure(1, weight=1); vals_f.grid_columnconfigure(2, weight=1)
+        
+        self._create_value_display(vals_f, "RTD TEMP", self.controller.rtd_temp if is_tx1 else self.controller.rtd_temp2, "°C", 0)
+        self._create_value_display(vals_f, "DEVICE TEMP", self.controller.thermo_val if is_tx1 else self.controller.thermo_val2, "°C", 1) # Using thermo_val as device temp for now
+        self._create_value_display(vals_f, "RSSI", self.controller.rssi_val if is_tx1 else self.controller.rssi_val2, "dBm", 2)
 
-        # Alerts
-        af = tk.Frame(parent, bg="white"); af.grid(row=2, column=0, sticky="ew", pady=5)
-        af.grid_columnconfigure(0, weight=1); af.grid_columnconfigure(1, weight=1)
-        self._create_alert(af, "BATTERY", 0, idx)
-        self._create_alert(af, "SENSOR", 1, idx)
+        # Panel Footer (Buttons)
+        footer = tk.Frame(parent, bg="#e6e6e6", height=45)
+        footer.grid(row=2, column=0, sticky="ew")
+        footer.grid_propagate(False)
+        
+        tk.Button(footer, text="⚙ PAIR DEVICE", font=("Arial", 9, "bold"), bg="#d0d0d0", fg="#333333", relief="raised", command=lambda: self.pair(idx)).pack(side="left", fill="y", padx=5, pady=5)
+        tk.Button(footer, text="⚙ CONFIGURATION", font=("Arial", 9, "bold"), bg="#d0d0d0", fg="#333333", relief="raised", command=lambda: self.open_config(idx)).pack(side="left", fill="y", padx=5, pady=5)
 
-        # Footer
-        bf = tk.Frame(parent, bg="#e6e6e6", height=50); bf.grid(row=3, column=0, sticky="ew"); bf.grid_propagate(False)
-        tk.Button(bf, text="PAIRED DEVICE", command=lambda: self.pair(idx)).pack(side="left", padx=10, pady=10)
-        tk.Button(bf, text="CONFIGURATION", command=lambda: self.config(idx)).pack(side="right", padx=10, pady=10)
-
-    def _create_alert(self, parent, title, col, idx):
+    def _create_alert_box(self, parent, title, col, idx):
         box = tk.Frame(parent, bg="white", relief="solid", borderwidth=1)
-        box.grid(row=0, column=col, sticky="ew", padx=5)
-        tk.Label(box, text=title, bg="white", font=("Arial", 8)).pack()
-        lbl = tk.Label(box, text="Normal", fg="green", bg="white", font=("Arial", 12, "bold"))
-        lbl.pack(pady=5)
-        setattr(self, f"{title.lower()}_{idx}_lbl", lbl); setattr(self, f"{title.lower()}_{idx}_box", box)
+        box.grid(row=0, column=col, sticky="ew", padx=3)
+        
+        header = tk.Frame(box, bg="white")
+        header.pack(pady=2)
+        tk.Label(header, text="●", fg="black", bg="white", font=("Arial", 8)).pack(side="left")
+        tk.Label(header, text=title, bg="white", font=("Arial", 7, "bold")).pack(side="left", padx=2)
+        
+        lbl = tk.Label(box, text="Normal", fg="green", bg="white", font=("Arial", 11, "bold"))
+        lbl.pack(pady=(0, 5))
+        
+        # Store refs
+        setattr(self, f"{title.lower()}_{idx}_lbl", lbl)
+        setattr(self, f"{title.lower()}_{idx}_box", box)
+
+    def _create_value_display(self, parent, label, var, unit, col):
+        f = tk.Frame(parent, bg="white")
+        f.grid(row=0, column=col, sticky="ew")
+        tk.Label(f, text=label, bg="white", fg="#666666", font=("Arial", 7, "bold")).pack()
+        tk.Label(f, textvariable=var, bg="white", fg="#0055aa", font=("Arial", 12, "bold")).pack()
+        tk.Label(f, text=unit, bg="white", fg="#666666", font=("Arial", 7)).pack()
 
     def update_clock(self):
         now = datetime.now()
@@ -284,7 +349,7 @@ class DashboardFrame(tk.Frame):
 
     def pair(self, idx): ConnectionSettings(self.controller, self, tx_index=idx)
     
-    def config(self, idx):
+    def open_config(self, idx):
         pwd = simpledialog.askstring("Security", "Enter Password:", show='*')
         if pwd == "1111":
             sf = self.controller.frames["SettingsFrame"]
@@ -292,55 +357,10 @@ class DashboardFrame(tk.Frame):
             self.controller.show_frame("SettingsFrame")
 
     def refresh_layout(self):
-        want1 = "Graph" if self.controller.view_mode.get() == "Graph View" else "Digital"
-        if self.tx1_view != want1:
-            if want1 == "Graph": self.tx1_digital_frame.grid_remove(); self.tx1_graph_frame.grid(row=1, column=0, sticky="nsew")
-            else: self.tx1_graph_frame.grid_remove(); self.tx1_digital_frame.grid(row=1, column=0, sticky="nsew")
-            self.tx1_view = want1
-        want2 = "Graph" if self.controller.view_mode2.get() == "Graph View" else "Digital"
-        if self.tx2_view != want2:
-            if want2 == "Graph": self.tx2_digital_frame.grid_remove(); self.tx2_graph_frame.grid(row=1, column=0, sticky="nsew")
-            else: self.tx2_graph_frame.grid_remove(); self.tx2_digital_frame.grid(row=1, column=0, sticky="nsew")
-            self.tx2_view = want2
+        pass
 
-    def update_graph(self):
-        scale_max = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}.get(self.controller.time_scale_str.get(), 60)
-        if self.tx1_view == "Graph" and self.controller.time_data:
-            st = self.controller.time_data[0]
-            x = [(t - st).total_seconds() for t in self.controller.time_data]
-            self.line1.set_data(x, list(self.controller.temp_data))
-            self.ax1.set_xlim(0, scale_max)
-            if self.controller.y_axis_mode.get() == "Manual": self.ax1.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
-            else: self.ax1.relim(); self.ax1.autoscale_view()
-            self.canvas1.draw()
-        if self.tx2_view == "Graph" and self.controller.time_data2:
-            st = self.controller.time_data2[0]
-            x = [(t - st).total_seconds() for t in self.controller.time_data2]
-            self.line2.set_data(x, list(self.controller.temp_data2))
-            self.ax2.set_xlim(0, scale_max)
-            if self.controller.y_axis_mode.get() == "Manual": self.ax2.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
-            else: self.ax2.relim(); self.ax2.autoscale_view()
-            self.canvas2.draw()
-
-    def _read_data(self):
-        if not self.controller.is_reading: return
-        try:
-            d = self.controller.port_manager.read_byte()
-            if d:
-                pkt = self.controller.packet_processor.process_byte(d)
-                if pkt: self._process_data(pkt, 1)
-        except Exception as e: logger.error(e)
-        self.after(20, self._read_data)
-
-    def _read_data2(self):
-        if not self.controller.is_reading2: return
-        try:
-            d = self.controller.port_manager2.read_byte()
-            if d:
-                pkt = self.controller.packet_processor2.process_byte(d)
-                if pkt: self._process_data(pkt, 2)
-        except Exception as e: logger.error(e)
-        self.after(20, self._read_data2)
+    def refresh_active_tx_vars(self): pass
+    def refresh_graph_view_row(self): pass
 
     def _process_data(self, pkt, idx):
         is_tx1 = (idx == 1)
@@ -350,31 +370,30 @@ class DashboardFrame(tk.Frame):
             if res:
                 if is_tx1:
                     self.controller.thermo_val.set(f"{res.thermocouple:.1f}")
-                    self.controller.temp_data.append(res.thermocouple); self.controller.time_data.append(datetime.now())
+                    self.controller.rtd_temp.set(f"{res.rtd_temperature}")
                     self.controller.battery_val.set(f"{res.battery_voltage:.2f}V")
-                    self.controller.rssi_val.set(f"{res.rssi} dBm")
-                    self.controller.raw_hex.set(bytes(pkt).hex().upper())
-                    self.controller.bat_voltage.set(f"{res.battery_voltage:.2f}V")
+                    self.controller.rssi_val.set(f"{res.rssi}")
+                    self.controller.transmitter_id_val.set(res.device_id)
                 else:
                     self.controller.thermo_val2.set(f"{res.thermocouple:.1f}")
-                    self.controller.temp_data2.append(res.thermocouple); self.controller.time_data2.append(datetime.now())
+                    self.controller.rtd_temp2.set(f"{res.rtd_temperature}")
                     self.controller.battery_val2.set(f"{res.battery_voltage:.2f}V")
-                    self.controller.rssi_val2.set(f"{res.rssi} dBm")
-                    self.controller.raw_hex2.set(bytes(pkt).hex().upper())
-                    self.controller.bat_voltage2.set(f"{res.battery_voltage:.2f}V")
+                    self.controller.rssi_val2.set(f"{res.rssi}")
+                    self.controller.transmitter_id_val2.set(res.device_id)
                 
                 self.controller.db_manager.log_measurement(
                     self.controller.station_name.get() if is_tx1 else self.controller.station_name2.get(),
                     res.device_id, 0, 0, 0, 0, res.rssi, idx
                 )
                 self._check_alerts(res, idx)
-                self.update_graph()
         except Exception as e: logger.error(e)
 
     def _check_alerts(self, data, idx):
-        b_lbl = getattr(self, f"battery_{idx}_lbl"); b_box = getattr(self, f"battery_{idx}_box")
-        if data.battery_voltage < 3.4: b_lbl.config(text="Low", fg="white", bg="red"); b_box.config(bg="red")
-        else: b_lbl.config(text="Normal", fg="green", bg="white"); b_box.config(bg="white")
+        # Update alert box statuses
+        b_lbl = getattr(self, f"battery_{idx}_lbl", None)
+        if b_lbl:
+            if data.battery_voltage < 3.4: b_lbl.config(text="Low", fg="red")
+            else: b_lbl.config(text="Normal", fg="green")
 
 class SettingsFrame(tk.Frame):
     def __init__(self, parent, controller):
@@ -487,16 +506,19 @@ class SettingsFrame(tk.Frame):
         c = self.controller; tx = self.active_tx
         if tx == 1:
             self.temp_name.set(c.station_name.get()); self.temp_vmode.set(c.view_mode.get()); self.temp_rtd.set(c.apply_rtd_compensation.get())
-            self.lbl_paired.config(text=f"Paired ID: {c.transmitter_id_val.get()}")
-            self.diag_hex.config(text=f"Raw HEX: {c.raw_hex.get()}"); self.diag_bat.config(text=f"Battery: {c.bat_voltage.get()}")
+            if hasattr(self, 'lbl_paired'): self.lbl_paired.config(text=f"Paired ID: {c.transmitter_id_val.get()}")
+            if hasattr(self, 'diag_hex'): self.diag_hex.config(text=f"Raw HEX: {c.raw_hex.get()}")
+            if hasattr(self, 'diag_bat'): self.diag_bat.config(text=f"Battery: {c.bat_voltage.get()}")
         else:
             self.temp_name.set(c.station_name2.get()); self.temp_vmode.set(c.view_mode2.get()); self.temp_rtd.set(c.apply_rtd_compensation2.get())
-            self.lbl_paired.config(text=f"Paired ID: {c.transmitter_id_val2.get()}")
-            self.diag_hex.config(text=f"Raw HEX: {c.raw_hex2.get()}"); self.diag_bat.config(text=f"Battery: {c.bat_voltage2.get()}")
+            if hasattr(self, 'lbl_paired'): self.lbl_paired.config(text=f"Paired ID: {c.transmitter_id_val2.get()}")
+            if hasattr(self, 'diag_hex'): self.diag_hex.config(text=f"Raw HEX: {c.raw_hex2.get()}")
+            if hasattr(self, 'diag_bat'): self.diag_bat.config(text=f"Battery: {c.bat_voltage2.get()}")
         
         self.temp_yscale.set(c.time_scale_str.get()); self.temp_ymode.set(c.y_axis_mode.get())
         self.temp_ymin.set(str(c.y_min.get())); self.temp_ymax.set(str(c.y_max.get()))
 
+    def refresh_layout(self): pass
     def refresh_graph_view_row(self): pass
 
     def save(self, tab):
