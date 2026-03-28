@@ -1194,20 +1194,15 @@ class SensorGUI(tk.Tk):
                   batt_raw: int,
                   rssi: int,
                   tx_index: int = 1):
-        """Insert raw measurement values into the database."""
+        """Insert raw measurement values into the database and commit immediately."""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
             self.cursor.execute(
                 "INSERT INTO measurements (timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi, tx_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (ts, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi, tx_index)
             )
-            if not hasattr(self, '_commit_counter'):
-                self._commit_counter = 0
-            self._commit_counter += 1
-            if self._commit_counter >= 10:
-                self.conn.commit()
-                self._commit_counter = 0
-            logger.debug(f"Logged measurement TX{tx_index}: {station_name} | {device_id} | RSSI: {rssi}")
+            self.conn.commit()
+            print(f"[DB] TX{tx_index} row saved: {ts} | {device_id} | thermo={thermo_raw}")
         except Exception as exc:
             logger.error(f"Database error: {exc}")
 
@@ -1255,8 +1250,6 @@ class SensorGUI(tk.Tk):
         # after raising, give the new page a chance to update its layout or data
         if name == "DashboardFrame" and hasattr(frame, "refresh_layout"):
             frame.refresh_layout()
-        if name == "SettingsFrame" and hasattr(frame, "refresh_history"):
-            frame.refresh_history()
 
 class DashboardFrame(tk.Frame):
     """Main dashboard display - Full Screen"""
@@ -1637,12 +1630,20 @@ class DashboardFrame(tk.Frame):
             sf = self.controller.frames.get("SettingsFrame")
             if sf:
                 sf.active_tx = tx_index
-                # Sync temp vars to current values before showing
+                sf.temp_station_name.set(
+                    self.controller.station_name.get() if tx_index == 1
+                    else self.controller.station_name2.get()
+                )
                 sf.temp_view_mode.set(self.controller.view_mode.get())
                 sf.temp_view_mode2.set(self.controller.view_mode2.get())
-                sf.refresh_graph_view_row()
+                sf.temp_rtd_enable.set(
+                    self.controller.apply_rtd_compensation.get() if tx_index == 1
+                    else self.controller.apply_rtd_compensation2.get()
+                )
                 sf.refresh_active_tx_vars()
-            self.controller.show_frame("SettingsFrame")
+                # Always land on General tab — it's pre-built so no lag
+                sf.show_tab("General")
+                self.controller.show_frame("SettingsFrame")
         elif password is not None:
             messagebox.showerror("Access Denied", "Incorrect Password")
 
@@ -1881,8 +1882,8 @@ class DashboardFrame(tk.Frame):
                     logger.info(f"Connected to {port_name}")
                 self.after(0, update_status)
                 
-                # Start read loop from main thread
-                self.after(0, self._read_data)
+                # Start read loop in background thread
+                threading.Thread(target=self._read_data, daemon=True).start()
                 
             else:
                 logger.error(f"Failed to connect: {msg}")
@@ -1922,245 +1923,147 @@ class DashboardFrame(tk.Frame):
     
 
     def _read_data(self):
-        """Read from serial port (TX1)"""
-        if not self.controller.is_reading or not self.controller.port_manager.is_open:
-            return
-        
-        try:
-            data = self.controller.port_manager.read_byte()
-            if data:
-                packet = self.controller.packet_processor.process_byte(data)
-                if packet:
-                    self._process_data(packet, tx_index=1)
-        except Exception as e:
-            logger.warning(f"Read error TX1: {e}")
-        
-        if self.controller.is_reading:
-            self.after(20, self._read_data)
+        """Read from serial port TX1 — runs in a background thread."""
+        while self.controller.is_reading:
+            try:
+                if not self.controller.port_manager.is_open:
+                    break
+                data = self.controller.port_manager.read_byte()
+                if data:
+                    packet = self.controller.packet_processor.process_byte(data)
+                    if packet:
+                        p = packet
+                        self.after(0, lambda p=p: self._process_data(p, tx_index=1))
+            except Exception as e:
+                logger.warning(f"Read error TX1: {e}")
+                break
 
     def _read_data2(self):
-        """Read from serial port (TX2)"""
-        if not self.controller.is_reading2 or not self.controller.port_manager2.is_open:
-            return
-        
-        try:
-            data = self.controller.port_manager2.read_byte()
-            if data:
-                packet = self.controller.packet_processor2.process_byte(data)
-                if packet:
-                    self._process_data(packet, tx_index=2)
-        except Exception as e:
-            logger.warning(f"Read error TX2: {e}")
-        
-        if self.controller.is_reading2:
-            self.after(20, self._read_data2)
+        """Read from serial port TX2 — runs in a background thread."""
+        while self.controller.is_reading2:
+            try:
+                if not self.controller.port_manager2.is_open:
+                    break
+                data = self.controller.port_manager2.read_byte()
+                if data:
+                    packet = self.controller.packet_processor2.process_byte(data)
+                    if packet:
+                        p = packet
+                        self.after(0, lambda p=p: self._process_data(p, tx_index=2))
+            except Exception as e:
+                logger.warning(f"Read error TX2: {e}")
+                break
 
     def _process_data(self, packet, tx_index=1):
-        """Process sensor data and update UI for the given transmitter (1 or 2)."""
+        """Process sensor data — always logs to DB, throttles UI updates to 5fps."""
+        import time
         is_tx1 = (tx_index == 1)
         ctrl = self.controller
         rtd_comp = ctrl.apply_rtd_compensation.get() if is_tx1 else ctrl.apply_rtd_compensation2.get()
 
-    # -------- PARSE DATA --------
+        # -------- PARSE --------
         try:
-           data = ctrl.data_parser.parse_packet(packet, enable_rtd_compensation=rtd_comp)
-
-           # Route parsed values to the correct StringVars
-           if is_tx1:
-               _current_temp = ctrl.current_temp
-               _thermo_val = ctrl.thermo_val
-               _rtd_temp = ctrl.rtd_temp
-               _battery_val = ctrl.battery_val
-               _rssi_val = ctrl.rssi_val
-               _bat_voltage = ctrl.bat_voltage
-               _raw_hex = ctrl.raw_hex
-               _tx_id_val = ctrl.transmitter_id_val
-           else:
-               _current_temp = ctrl.current_temp2
-               _thermo_val = ctrl.thermo_val2
-               _rtd_temp = ctrl.rtd_temp2
-               _battery_val = ctrl.battery_val2
-               _rssi_val = ctrl.rssi_val2
-               _bat_voltage = ctrl.bat_voltage2
-               _raw_hex = ctrl.raw_hex2
-               _tx_id_val = ctrl.transmitter_id_val2
-
-           device_temp = getattr(data, "temperature", None)
-           _current_temp.set(f"{device_temp:.1f}" if device_temp is not None else "--")
-
-           rtd_temp = getattr(data, "rtd_temperature", None)
-           _rtd_temp.set(f"{rtd_temp:.1f}" if rtd_temp is not None else "--")
-
-           rtd_res = getattr(data, "rtd_resistance", None)
-           if is_tx1:
-               ctrl.rtd_resistance = f"{rtd_res:.2f} Ω" if rtd_res is not None else "--"
-
-           tc = getattr(data, "thermocouple", None)
-           _thermo_val.set(f"{tc:.1f}" if tc is not None else "--")
-
-           tc_uv = getattr(data, "thermocouple_voltage_uv", None)
-           if is_tx1:
-               ctrl.tc_uv = f"{tc_uv:.0f} µV" if tc_uv is not None else "--"
-
-           batt = getattr(data, "battery_voltage", None)
-           if batt is not None:
-               _battery_val.set(f"{batt:.2f}V")
-               _bat_voltage.set(f"{batt:.2f}V")
-           else:
-               _battery_val.set("--")
-               _bat_voltage.set("--")
-
-           rssi = getattr(data, "rssi", None)
-           if rssi is not None:
-               try:
-                   _rssi_val.set(f"{float(rssi):.0f} dBm")
-               except Exception:
-                   _rssi_val.set(str(rssi))
-           else:
-               if _rssi_val.get() == "":
-                   _rssi_val.set("--")
-
-           dev_id = getattr(data, "device_id", None)
-           if dev_id is not None:
-               _tx_id_val.set(str(dev_id))
-
-           raw_packet = getattr(data, "raw_packet", None)
-           _raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet) if raw_packet else "--")
-
+            data = ctrl.data_parser.parse_packet(packet, enable_rtd_compensation=rtd_comp)
         except Exception as exc:
-           logger.error(f"Error parsing packet TX{tx_index}: {exc}", exc_info=True)
-           return
+            logger.error(f"Error parsing packet TX{tx_index}: {exc}", exc_info=True)
+            return
 
-        # ===============================
-        # TRANSMITTER DISCOVERY & FILTERING
-        # ===============================
-        tx_id = getattr(data, "device_id", None)
+        # -------- ALWAYS LOG TO DB (not throttled) --------
+        try:
+            pkt = data.raw_packet or packet
+            dev_id = getattr(data, "device_id", "") or ""
+            melt_temp = getattr(data, "thermocouple", None)
+
+            if melt_temp is not None:
+                temp_int   = (pkt[3] << 24) | (pkt[2] << 16) | (pkt[1] << 8) | pkt[0]
+                rtd_int    = (pkt[11] << 8) | pkt[10]
+                thermo_int = (pkt[13] << 8) | pkt[12]
+                batt_int   = (pkt[15] << 8) | pkt[14]
+                station_name = (ctrl.station_name if is_tx1 else ctrl.station_name2).get() or "UNKNOWN"
+                rssi_raw = getattr(data, "rssi", 0) or 0
+                try:
+                    rssi_int = int(float(str(rssi_raw).replace(" dBm", "").strip()))
+                except Exception:
+                    rssi_int = 0
+                ctrl.log_to_db(station_name, dev_id, temp_int, rtd_int, thermo_int, batt_int, rssi_int, tx_index)
+
+                # graph buffers
+                if is_tx1:
+                    ctrl.temp_data.append(float(melt_temp))
+                    ctrl.time_data.append(datetime.now())
+                else:
+                    ctrl.temp_data2.append(float(melt_temp))
+                    ctrl.time_data2.append(datetime.now())
+        except Exception as exc:
+            logger.error(f"DB/buffer error TX{tx_index}: {exc}", exc_info=True)
+
+        # -------- THROTTLE UI UPDATES --------
+        now = time.monotonic()
+        attr = f"_last_ui_update_{tx_index}"
+        if now - getattr(self, attr, 0) < 0.2:
+            return
+        setattr(self, attr, now)
+
+        # -------- TRANSMITTER DISCOVERY & FILTERING --------
+        tx_id = str(getattr(data, "device_id", "") or "")
         conn_attr = "connection_window" if is_tx1 else "connection_window2"
         conn = getattr(self, conn_attr, None)
 
         try:
-           if conn and tx_id:
-            tx_id = str(tx_id)
-            try:
-                conn.winfo_exists()
-            except tk.TclError:
-                conn = None
-
-            if conn and conn.winfo_exists():
-              if tx_id not in conn.tx_ids:
-                conn.tx_ids.append(tx_id)
+            if conn and tx_id:
                 try:
-                    conn.tx_combo["values"] = conn.tx_ids
+                    if not conn.winfo_exists():
+                        conn = None
                 except tk.TclError:
-                    pass
+                    conn = None
 
-              if len(conn.tx_ids) == 1:
-                try:
-                    conn.tx_combo.current(0)
-                    conn.selected_tx = tx_id
-                    _tx_id_val.set(tx_id)
-                except tk.TclError:
-                    conn.selected_tx = tx_id
-                    _tx_id_val.set(tx_id)
+                if conn:
+                    if tx_id not in conn.tx_ids:
+                        conn.tx_ids.append(tx_id)
+                        try:
+                            conn.tx_combo["values"] = conn.tx_ids
+                        except tk.TclError:
+                            pass
+                    if len(conn.tx_ids) == 1:
+                        try:
+                            conn.tx_combo.current(0)
+                            conn.selected_tx = tx_id
+                        except tk.TclError:
+                            conn.selected_tx = tx_id
         except Exception as exc:
-           logger.warning(f"Error in TX{tx_index} discovery: {exc}", exc_info=True)
+            logger.warning(f"TX{tx_index} discovery error: {exc}", exc_info=True)
 
-        # ===============================
-        # TRANSMITTER SELECTION FILTERING
-        # ===============================
+        # Filter by selected transmitter ID
         conn = getattr(self, conn_attr, None)
-        selected_tx = None
         if conn:
             try:
-                if conn.winfo_exists():
-                    selected_tx = getattr(conn, "selected_tx", None)
-                else:
-                    conn = None
+                selected_tx = getattr(conn, "selected_tx", None) if conn.winfo_exists() else None
             except tk.TclError:
-                conn = None
+                selected_tx = None
+            if selected_tx and tx_id and tx_id != str(selected_tx):
+                return
 
-        if selected_tx and str(tx_id) != str(selected_tx):
-            return
+        # -------- UPDATE UI VARS --------
+        if is_tx1:
+            _current_temp = ctrl.current_temp;  _thermo_val = ctrl.thermo_val
+            _rtd_temp     = ctrl.rtd_temp;      _battery_val = ctrl.battery_val
+            _rssi_val     = ctrl.rssi_val;      _bat_voltage = ctrl.bat_voltage
+            _raw_hex      = ctrl.raw_hex;       _tx_id_val   = ctrl.transmitter_id_val
+        else:
+            _current_temp = ctrl.current_temp2; _thermo_val = ctrl.thermo_val2
+            _rtd_temp     = ctrl.rtd_temp2;     _battery_val = ctrl.battery_val2
+            _rssi_val     = ctrl.rssi_val2;     _bat_voltage = ctrl.bat_voltage2
+            _raw_hex      = ctrl.raw_hex2;      _tx_id_val   = ctrl.transmitter_id_val2
 
-        # -------- DEVICE TEMPERATURE (second pass after filter) --------
         device_temp = getattr(data, "temperature", None)
         _current_temp.set(f"{device_temp:.1f}" if device_temp is not None else "--")
+
         rtd_temp = getattr(data, "rtd_temperature", None)
         _rtd_temp.set(f"{rtd_temp:.1f}" if rtd_temp is not None else "--")
 
-        # --- log to database and update history/graph ---
-        melt_temp = getattr(data, "thermocouple", None)
-        new_val = None
-        if melt_temp is not None:
-            try:
-                new_val = float(melt_temp)
-            except Exception:
-                new_val = None
-
-        if new_val is not None:
-            if is_tx1:
-                ctrl.temp_data.append(new_val)
-                ctrl.time_data.append(datetime.now())
-            else:
-                ctrl.temp_data2.append(new_val)
-                ctrl.time_data2.append(datetime.now())
-
-            bat_pct = None
-            batt = getattr(data, "battery_voltage", None)
-            if batt is not None:
-                try:
-                    voltage = float(batt)
-                    bat_pct = int(round(100.0 * (voltage - 3.0) / (4.2 - 3.0)))
-                    bat_pct = max(0, min(100, bat_pct))
-                except Exception:
-                    bat_pct = None
-
-            pkt = data.raw_packet or packet
-            dev_id = getattr(data, "device_id", "")
-
-            temp_int = pkt[3]
-            temp_int = (temp_int << 8) | pkt[2]
-            temp_int = (temp_int << 8) | pkt[1]
-            temp_int = (temp_int << 8) | pkt[0]
-            rtd_int = pkt[11]
-            rtd_int = (rtd_int << 8) | pkt[10]
-            thermo_int = pkt[13]
-            thermo_int = (thermo_int << 8) | pkt[12]
-            batt_int = (pkt[15] << 8) | pkt[14]
-
-            station_name = (ctrl.station_name if is_tx1 else ctrl.station_name2).get() or "UNKNOWN"
-            rssi_val = getattr(data, "rssi", 0) or 0
-            try:
-               rssi_int = int(float(str(rssi_val).replace(" dBm", "").strip()))
-            except Exception:
-               rssi_int = 0
-
-            ctrl.log_to_db(station_name, dev_id, temp_int, rtd_int, thermo_int, batt_int, rssi_int, tx_index)
-
-            if is_tx1:
-                logger.debug(f"[DASHBOARD TX1] Writing packet to output port: {pkt}")
-                ctrl.port_manager.write_byte(bytes(pkt))
-
-            if ctrl.view_mode.get() == "Graph View" and "DashboardFrame" in ctrl.frames:
-                ctrl.frames["DashboardFrame"].update_graph()
-
-            ts = datetime.now().strftime("%H:%M:%S")
-            ctrl.history_display.appendleft(
-                f"TX{tx_index} {ts} | Melt:{new_val}{ctrl.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi_val}dBm"
-            )
-            if is_tx1 and "DashboardFrame" in ctrl.frames:
-                try:
-                    pass  # graph already updated above
-                except Exception:
-                    pass
-
-        elif tc is not None:
-            if is_tx1:
-                self.tc_fifo.append(tc)
-                if len(self.tc_fifo) > 10:
-                    self.tc_fifo.pop(0)
-                avg_tc = sum(self.tc_fifo) / len(self.tc_fifo)
-                _thermo_val.set(f"{avg_tc:.1f}")
+        tc = getattr(data, "thermocouple", None)
+        if tc is not None:
+            _thermo_val.set(f"{tc:.1f}")
 
         batt = getattr(data, "battery_voltage", None)
         if batt is not None:
@@ -2170,26 +2073,32 @@ class DashboardFrame(tk.Frame):
             _battery_val.set("--")
             _bat_voltage.set("--")
 
-        raw_packet = getattr(data, "raw_packet", None)
-        if raw_packet:
-            _raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
-
         rssi = getattr(data, "rssi", None)
         if rssi is not None:
             try:
                 _rssi_val.set(f"{float(rssi):.0f} dBm")
             except Exception:
                 _rssi_val.set(str(rssi))
-        else:
-            if _rssi_val.get() == "":
-                _rssi_val.set("--")
+
+        if tx_id:
+            _tx_id_val.set(tx_id)
+
+        raw_packet = getattr(data, "raw_packet", None)
+        _raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet) if raw_packet else "--")
+
+        if is_tx1:
+            ctrl.port_manager.write_byte(bytes(pkt))
+
+        # Update graph if in graph view
+        view_mode = ctrl.view_mode.get() if is_tx1 else ctrl.view_mode2.get()
+        if view_mode == "Graph View" and "DashboardFrame" in ctrl.frames:
+            ctrl.frames["DashboardFrame"].update_graph()
 
         try:
             self._check_alerts(data, tx_index=tx_index)
         except Exception as e:
-            print(f"Alert error TX{tx_index}:", e)
-        
-    
+            logger.warning(f"Alert error TX{tx_index}: {e}")
+
     def _check_alerts(self, data, tx_index=1):
         """Check sensor data for alert conditions"""
         is_tx1 = (tx_index == 1)
@@ -2606,7 +2515,8 @@ class ConnectionSettings(tk.Toplevel):
                             conn_window_ref.status_label.config(text=f"✓ Connected to {port_name}", fg="green")
                     except Exception:
                         pass
-                    self.dashboard.after(0, self._read_data_fn)
+                    # Start read loop in background thread
+                    threading.Thread(target=self._read_data_fn, daemon=True).start()
                 self.dashboard.after(0, _ui)
             else:
                 def _ui_err():
@@ -2675,423 +2585,80 @@ class SettingsFrame(tk.Frame):
     def __init__(self, parent, controller):
         super().__init__(parent, bg="#f0f0f0")
         self.controller = controller
-        logger.info("Initializing SettingsFrame")
-        self.after(30, self.load_tabs_lazy)
+        self._tabs_built = set()   # tracks which tabs have been built
+        self._create_shell_ui()    # build only header + nav bar immediately
 
-    # =========================
-# FIX FOR TAB LOADING ERROR
-# =========================
-
-    def load_tabs_lazy(self):
-       import threading
-       threading.Thread(target=self._load_tabs_bg, daemon=True).start()
-
-
-    def _load_tabs_bg(self):
-        try:
-          print("Loading tabs in background...")
-
-        # ✅ DO NOT TOUCH UI HERE
-
-        # Go back to UI thread safely
-          self.after(0, self._create_tabs_ui)
-
-        except Exception as e:
-           print("Error in _load_tabs_bg:", e)
-
-
-    def _create_tabs_ui(self):
-        self.tab_frames = {}
-        try:
-           print("Creating tabs UI...")
-
-        except Exception as e:
-          print("UI error:", e)
-        
-        # -------- Temporary variables for settings --------
+    def _create_shell_ui(self):
+        """Build the chrome (header, tab bar, bottom bar, content area) — no tab content yet."""
+        # -------- Shared temp vars --------
         self.temp_station_name = tk.StringVar(value=self.controller.station_name.get())
-        self.temp_view_mode = tk.StringVar(value=self.controller.view_mode.get())
-        self.temp_view_mode2 = tk.StringVar(value=self.controller.view_mode2.get())
-        self.temp_time_scale = tk.StringVar(value=self.controller.time_scale_str.get())
-        self.temp_y_min = tk.StringVar(value=self.controller.y_min.get())
-        self.temp_y_max = tk.StringVar(value=self.controller.y_max.get())
-        self.temp_y_axis_mode = tk.StringVar(value=self.controller.y_axis_mode.get())
-        self.temp_units = tk.StringVar(value=self.controller.units.get())
-        self.temp_rtd_enable = tk.BooleanVar(value=self.controller.apply_rtd_compensation.get())
+        self.temp_view_mode    = tk.StringVar(value=self.controller.view_mode.get())
+        self.temp_view_mode2   = tk.StringVar(value=self.controller.view_mode2.get())
+        self.temp_time_scale   = tk.StringVar(value=self.controller.time_scale_str.get())
+        self.temp_y_min        = tk.StringVar(value=str(self.controller.y_min.get()))
+        self.temp_y_max        = tk.StringVar(value=str(self.controller.y_max.get()))
+        self.temp_y_axis_mode  = tk.StringVar(value=self.controller.y_axis_mode.get())
+        self.temp_units        = tk.StringVar(value=self.controller.units.get())
+        self.temp_rtd_enable   = tk.BooleanVar(value=self.controller.apply_rtd_compensation.get())
+        self.active_tx         = 1
+        self.date_from_var     = tk.StringVar(value="")
+        self.date_to_var       = tk.StringVar(value="")
 
         # Header
         header = tk.Frame(self, bg="#e6e6e6", height=60)
-        header.pack(fill="x", padx=0, pady=0)
+        header.pack(fill="x")
         header.pack_propagate(False)
-        
-        tk.Label(header, text="CONFIGURATION - WIRELESS SENSOR SYSTEM", fg="#333333", bg="#e6e6e6", 
-                font=("Arial", 18, "bold")).pack(side="left", padx=30, pady=15)
-        
-        """tk.Button(header, text="← BACK TO DASHBOARD", bg="#cccccc", fg="black", font=("Arial", 10, "bold"),
-                 command=lambda: controller.show_frame("DashboardFrame"), 
-                 activebackground="#000000", activeforeground="#ffffff").pack(side="right", padx=20, pady=12)"""
-        
-          # ========== TAB NAVIGATION (HORIZONTAL) ==========
+        tk.Label(header, text="CONFIGURATION - WIRELESS SENSOR SYSTEM",
+                 fg="#333333", bg="#e6e6e6",
+                 font=("Arial", 18, "bold")).pack(side="left", padx=30, pady=15)
+
+        # Tab navigation bar
         tab_nav = tk.Frame(self, bg="#d0d0d0", height=50)
-        tab_nav.pack(fill="x", padx=0, pady=0)
+        tab_nav.pack(fill="x")
         tab_nav.pack_propagate(False)
-        
+
         self.tab_buttons = {}
-       
-        tabs = ["General", "Graph", "Transmitter", "Outputs", "Troubleshooting", "History", "RTD Compensation"]
-        
-        for i, tab_name in enumerate(tabs):
-            btn = tk.Button(
-                tab_nav,
-                text=tab_name,
-                bg="#cccccc" if i == 0 else "#b0b0b0",
-                fg="black",
-                font=("Arial", 11, "bold"),
-                relief="raised",
-                padx=15,
-                pady=10,
-                command=lambda t=tab_name: self.show_tab(t)
-            )
+        self.tab_frames  = {}
+        tabs = ["General", "Graph", "Transmitter", "Outputs",
+                "Troubleshooting", "History", "RTD Compensation"]
+
+        for i, name in enumerate(tabs):
+            btn = tk.Button(tab_nav, text=name,
+                            bg="#cccccc" if i == 0 else "#b0b0b0",
+                            fg="black", font=("Arial", 11, "bold"),
+                            relief="raised", padx=15, pady=10,
+                            command=lambda t=name: self.show_tab(t))
             btn.pack(side="left", padx=2, pady=5)
-            self.tab_buttons[tab_name] = btn
-        # ===== Bottom Navigation Bar =====
-        bottom_frame = tk.Frame(self, bg="#d9d9d9", height=50)
-        bottom_frame.pack(side="bottom", fill="x")
+            self.tab_buttons[name] = btn
 
-        back_btn = tk.Button(bottom_frame,text="← BACK TO DASHBOARD",bg="#3c3f41",fg="white",
-        font=("Arial", 11, "bold"),padx=20,pady=5,command=lambda: self.controller.show_frame("DashboardFrame")
-        )
+        # Bottom bar
+        bottom = tk.Frame(self, bg="#d9d9d9", height=50)
+        bottom.pack(side="bottom", fill="x")
+        bottom.pack_propagate(False)
+        tk.Button(bottom, text="← BACK TO DASHBOARD",
+                  bg="#3c3f41", fg="white", font=("Arial", 11, "bold"),
+                  padx=20, pady=5,
+                  command=lambda: self.controller.show_frame("DashboardFrame")
+                  ).pack(side="right", padx=20, pady=8)
 
-        back_btn.pack(side="right", padx=20, pady=8)
-        
-        # ========== CONTENT AREA ==========
+        # Content area — all tab frames stack here via grid
         self.content_container = tk.Frame(self, bg="#f0f0f0")
-        self.content_container.pack(fill="both", expand=True, padx=0, pady=0)
+        self.content_container.pack(fill="both", expand=True)
         self.content_container.grid_rowconfigure(0, weight=1)
         self.content_container.grid_columnconfigure(0, weight=1)
-        
-        # ========== TAB 1: GENERAL ==========
-        self.tab_frames["General"] = tk.Frame(self.content_container, bg="#f0f0f0")
+
+        # Pre-build General tab so first open is instant
+        self._build_tab("General")
+        self._tabs_built.add("General")
         self.tab_frames["General"].grid(row=0, column=0, sticky="nsew")
+        self.tab_buttons["General"].config(bg="#ffffff", relief="sunken")
 
-        self.tab_frames["General"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["General"].grid_columnconfigure(0, weight=1)
-    
-        gen_content = tk.Frame(self.tab_frames["General"], bg="#f0f0f0")
-        gen_content.pack(fill="x", padx=30, pady=30)
-        
-        tk.Label(gen_content, text="General Settings", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        self.create_entry_row(gen_content, "Station Name:", self.temp_station_name)
-        self.create_static_row(gen_content, "Sensor Type:", "Type B")
-        
-        gen_btn_frame = tk.Frame(gen_content, bg="#f0f0f0")
-        gen_btn_frame.pack(fill="x", pady=20)
-        tk.Button(gen_btn_frame, text="✔ SAVE GENERAL SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("General")).pack(pady=10)
+    # kept for backward-compat (called from DashboardFrame.__init__ via after(30,...))
+    def load_tabs_lazy(self):
+        pass
 
-        # ========== TAB 2: GRAPH ==========
-        self.tab_frames["Graph"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Graph"].grid(row=0, column=0, sticky="nsew")
-        self.tab_frames["Graph"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["Graph"].grid_columnconfigure(0, weight=1)
-
-        graph_content = tk.Frame(self.tab_frames["Graph"], bg="#f0f0f0")
-        graph_content.pack(fill="x", padx=30, pady=30)
-        
-        tk.Label(graph_content, text="Graph  Settings", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        tk.Label(graph_content, text="Configure time scales and axis modes for live graph display", 
-                font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
-        # interactive controls — stored refs for show/hide per active TX
-        self.tx1_view_row = tk.Frame(graph_content, bg="#f0f0f0")
-        self.tx1_view_row.pack(fill="x", pady=8)
-        tk.Label(self.tx1_view_row, text="Graph View:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        ttk.Combobox(self.tx1_view_row, textvariable=self.temp_view_mode, values=["Digital View", "Graph View"], state="readonly", font=("Arial", 11), width=25).pack(side="left", padx=15)
-
-        self.tx2_view_row = tk.Frame(graph_content, bg="#f0f0f0")
-        self.tx2_view_row.pack(fill="x", pady=8)
-        tk.Label(self.tx2_view_row, text="Graph View:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        ttk.Combobox(self.tx2_view_row, textvariable=self.temp_view_mode2, values=["Digital View", "Graph View"], state="readonly", font=("Arial", 11), width=25).pack(side="left", padx=15)
-
-        # default: show only TX1 row
-        self.active_tx = 1
-        self.refresh_graph_view_row()
-        self.create_combobox_row(graph_content, "Time Scale:",self.temp_time_scale,  ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
-        tk.Label(graph_content, text="Y-Axis Mode:", font=("Arial", 12), bg="#f0f0f0").pack(anchor="nw",pady=(10,0))
-
-        # Temperature Range (Min - Max)
-        temp_range_frame = tk.Frame(graph_content, bg="#f0f0f0")
-        temp_range_frame.pack(fill="x", pady=10)
-        tk.Label(temp_range_frame, text="Temperature Range:", width=20, anchor="e", bg="#f0f0f0", 
-         font=("Arial", 12, "bold")).pack(side="left")
-
-        range_input_frame = tk.Frame(temp_range_frame, bg="#f0f0f0")
-        range_input_frame.pack(side="left", padx=15)
-
-        tk.Label(range_input_frame, text="Min (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
-        min_entry = tk.Entry(range_input_frame, textvariable=self.temp_y_min, width=10, font=("Arial", 11))
-        min_entry.pack(side="left", padx=5)
- 
-        tk.Label(range_input_frame, text="Max (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
-        max_entry = tk.Entry(range_input_frame, textvariable=self.temp_y_max, width=10, font=("Arial", 11))
-        max_entry.pack(side="left", padx=5)
-
-        # Y-Axis Mode
-        mode_frame = tk.Frame(graph_content, bg="#f0f0f0")
-        mode_frame.pack(fill="x", pady=10)
-        tk.Label(mode_frame, text="Y-Axis Mode:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        tk.Radiobutton(mode_frame, text="Autoscale", variable=self.temp_y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack(side="left", padx=10)
-        tk.Radiobutton(mode_frame, text="Manual", variable=self.temp_y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack(side="left", padx=10)
-
-        """tk.Radiobutton(graph_content, text="Autoscale", variable=controller.y_axis_mode, value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack()
-        tk.Radiobutton(graph_content, text="Manual", variable=controller.y_axis_mode, value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack()
-        fr = tk.Frame(graph_content, bg="#f0f0f0"); fr.pack(pady=5)
-        tk.Entry(fr, textvariable=controller.y_min, width=6, font=("Arial", 12)).pack(side="left"); tk.Label(fr, text="-", bg="#f0f0f0").pack(side="left")
-        tk.Entry(fr, textvariable=controller.y_max, width=6, font=("Arial", 12)).pack(side="left")"""
-
-         # Add spacer to push button to bottom
-        graph_btn_frame = tk.Frame(graph_content, bg="#f0f0f0")
-        graph_btn_frame.pack(fill="x", pady=20)
-        tk.Button(graph_btn_frame, text="✔ SAVE GRAPH SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("Graph")).pack(pady=10)
-
-        
-        # ========== TAB 3: TRANSMITTER ==========
-        self.tab_frames["Transmitter"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Transmitter"].grid(row=0, column=0, sticky="nsew")
-        self.tab_frames["Transmitter"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["Transmitter"].grid_columnconfigure(0, weight=1)
-
-        tx_content = tk.Frame(self.tab_frames["Transmitter"], bg="#f0f0f0")
-        tx_content.pack(fill="x", padx=30, pady=30)
-        
-        tk.Label(tx_content, text="Transmitter Information", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        
-        tx_frame = tk.Frame(tx_content, bg="#f0f0f0")
-        tx_frame.pack(fill="x", pady=8)
-        tk.Label(tx_frame, text="Paired Device:", width=20, anchor="e", bg="#f0f0f0", 
-        font=("Arial", 12, "bold")).pack(side="left")
-
-# ADD TRANSMITTER ID LABEL TO FRAME (NOT to tx_content)
-        self.tx_id_label = tk.Label(tx_frame, textvariable=self.controller.transmitter_id_val, 
-         fg="#0055aa", bg="#f0f0f0", font=("Arial", 12, "bold"))
-        self.tx_id_label.pack(side="left", padx=15)
-
-# Device Status row (separate)
-        self.create_static_row(tx_content, "Device Status:", "Connected")
-        tx_btn_frame = tk.Frame(tx_content, bg="#f0f0f0")
-        tx_btn_frame.pack(fill="x", pady=20)
-        tk.Button(tx_btn_frame, text="✔ SAVE TRANSMITTER SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("Transmitter")).pack(pady=10)
-
-
-        # ========== TAB 4: OUTPUTS ==========
-        self.tab_frames["Outputs"] = tk.Frame(self.content_container, bg="#f0f0f0")
-
-        self.tab_frames["Outputs"].grid(row=0, column=0, sticky="nsew")
-        self.tab_frames["Outputs"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["Outputs"].grid_columnconfigure(0, weight=1)
-        outputs_content = tk.Frame(self.tab_frames["Outputs"], bg="#f0f0f0")
-        outputs_content.pack(fill="x", padx=30, pady=30)
-
-        tk.Label(outputs_content, text="Output Port Configuration", fg="#333333", bg="#f0f0f0", 
-          font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-
-       # ===== OUTPUT PORT SELECTION FRAME =====
-        port_frame = tk.LabelFrame(outputs_content, text="COM Port Settings", bg="#f0f0f0", 
-                          font=("Arial", 12, "bold"), padx=15, pady=15)
-        port_frame.pack(fill="x", pady=10)
-
-        # Port Selection Row
-        port_row = tk.Frame(port_frame, bg="#f0f0f0")
-        port_row.pack(fill="x", pady=8)
-
-        tk.Label(port_row, text="Select Output Port:", width=18, anchor="w", bg="#f0f0f0", 
-          font=("Arial", 11)).pack(side="left", padx=10)
-
-        self.output_port_combo = ttk.Combobox(port_row, width=12, state="readonly", font=("Arial", 10))
-        self.output_port_combo.pack(side="left", padx=10)
-
-# Refresh Ports Button
-        tk.Button(port_row, text="🔄 Refresh", bg="#2196F3", fg="white", 
-           font=("Arial", 10, "bold"), width=15,
-           command=lambda: self.refresh_output_ports()).pack(side="left", padx=5)
-
-# Baud Rate Selection Row
-        baud_row = tk.Frame(port_frame, bg="#f0f0f0")
-        baud_row.pack(fill="x", pady=8)
-
-        tk.Label(baud_row, text="Baud Rate:", width=18, anchor="w", bg="#f0f0f0", 
-          font=("Arial", 11)).pack(side="left", padx=5)
-
-        self.output_baud_combo = ttk.Combobox(baud_row, 
-                                      values=["9600", "19200", "38400", "57600", "115200"],
-                                      state="readonly", width=12, font=("Arial", 10))
-        self.output_baud_combo.pack(side="left", padx=10)
-        self.output_baud_combo.set("115200")  # Default value
-
-# ===== CONTROL BUTTONS =====
-        button_frame = tk.Frame(outputs_content, bg="#f0f0f0")
-        button_frame.pack(fill="x", pady=20)
-
-        self.output_enable_btn = tk.Button(button_frame, text="✓ ENABLE OUTPUT PORT", 
-                                   bg="#4caf50", fg="white", 
-                                   font=("Arial", 12, "bold"), width=25, height=2,
-                                   command=self.enable_output_port)
-        self.output_enable_btn.pack(side="left", padx=10)
-
-        self.out_notebook = ttk.Notebook(outputs_content)
-        self.out_notebook.pack(fill="both", expand=True, padx=0, pady=10)
-        
-        """tab_rtu = tk.Frame(self.out_notebook, bg="#f0f0f0")
-        self.out_notebook.add(tab_rtu, text="Modbus RTU")
-        rtu_content = tk.Frame(tab_rtu, bg="#f0f0f0")
-        rtu_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(rtu_content, "Slave ID:", controller.mb_slave_id)"""
-        
-        tab_tcp = tk.Frame(self.out_notebook, bg="#f0f0f0")
-        self.out_notebook.add(tab_tcp, text="Modbus TCP")
-        tcp_content = tk.Frame(tab_tcp, bg="#f0f0f0")
-        tcp_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(tcp_content, "IP Address:", self.controller.eth_ip)
-        self.create_entry_row(tcp_content, "Port:", self.controller.eth_port)
-        
-        """tab_420 = tk.Frame(self.out_notebook, bg="#f0f0f0")
-        self.out_notebook.add(tab_420, text="4-20mA")
-        analog_content = tk.Frame(tab_420, bg="#f0f0f0")
-        analog_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(analog_content, "Temp @ 4mA:", self.controller.analog_low)
-        self.create_entry_row(analog_content, "Temp @ 20mA:", self.controller.analog_high)
-        
-        tab_prof = tk.Frame(self.out_notebook, bg="#f0f0f0")
-        self.out_notebook.add(tab_prof, text="Profibus/Net")
-        prof_content = tk.Frame(tab_prof, bg="#f0f0f0")
-        prof_content.pack(fill="both", expand=True, padx=20, pady=20)
-        self.create_entry_row(prof_content, "Station Address:", self.controller.prof_station)"""
-         # Save button for Outputs tab
-        outputs_btn_frame = tk.Frame(outputs_content, bg="#f0f0f0")
-        outputs_btn_frame.pack(fill="x", pady=(0, 10))
-        tk.Button(outputs_btn_frame, text="✔ SAVE OUTPUT SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("Outputs")).pack(pady=10)
-        # ========== TAB 5: TROUBLESHOOTING ==========
-        self.tab_frames["Troubleshooting"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["Troubleshooting"].grid(row=0, column=0, sticky="nsew")
-        self.tab_frames["Troubleshooting"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["Troubleshooting"].grid_columnconfigure(0, weight=1)
-    
-        debug_content = tk.Frame(self.tab_frames["Troubleshooting"], bg="#f0f0f0")
-        debug_content.pack(fill="x", padx=30, pady=30)
-        
-        tk.Label(debug_content, text="Diagnostic Information", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        
-        diag_frame = tk.LabelFrame(debug_content, text="Sensor Diagnostics", bg="#f0f0f0", 
-                                  font=("Arial", 12, "bold"), padx=15, pady=15)
-        diag_frame.pack(fill="x", pady=10)
-
-        f_hex = tk.Frame(diag_frame, bg="#f0f0f0"); f_hex.pack(fill="x", pady=8)
-        tk.Label(f_hex, text="Raw ADC Hex:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        self.diag_raw_hex_lbl = tk.Label(f_hex, textvariable=self.controller.raw_hex, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
-        self.diag_raw_hex_lbl.pack(side="left", padx=15)
-
-        f_bat = tk.Frame(diag_frame, bg="#f0f0f0"); f_bat.pack(fill="x", pady=8)
-        tk.Label(f_bat, text="Battery Voltage:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        self.diag_bat_lbl = tk.Label(f_bat, textvariable=self.controller.bat_voltage, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
-        self.diag_bat_lbl.pack(side="left", padx=15)
-
-        port_diag_frame = tk.LabelFrame(debug_content, text="Port Diagnostics", bg="#f0f0f0", 
-                               font=("Arial", 12, "bold"), padx=15, pady=15)
-        port_diag_frame.pack(fill="x", pady=10)
-
-        f_port = tk.Frame(port_diag_frame, bg="#f0f0f0"); f_port.pack(fill="x", pady=8)
-        tk.Label(f_port, text="Connected Port:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        self.diag_port_lbl = tk.Label(f_port, textvariable=self.controller.com_port_val, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
-        self.diag_port_lbl.pack(side="left", padx=15)
-
-        f_status = tk.Frame(port_diag_frame, bg="#f0f0f0"); f_status.pack(fill="x", pady=8)
-        tk.Label(f_status, text="Connection Status:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        self.diag_status_lbl = tk.Label(f_status, textvariable=self.controller.status_msg, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
-        self.diag_status_lbl.pack(side="left", padx=15)
-
-        f_txid = tk.Frame(port_diag_frame, bg="#f0f0f0"); f_txid.pack(fill="x", pady=8)
-        tk.Label(f_txid, text="Transmitter ID:", width=20, anchor="e", bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
-        self.diag_txid_lbl = tk.Label(f_txid, textvariable=self.controller.transmitter_id_val, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
-        self.diag_txid_lbl.pack(side="left", padx=15)
-      
-        # ========== TAB 6: HISTORY ==========
-        self.tab_frames["History"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["History"].grid(row=0, column=0, sticky="nsew")
-        self.tab_frames["History"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["History"].grid_columnconfigure(0, weight=1)
-        hist_content = tk.Frame(self.tab_frames["History"], bg="#f0f0f0")
-        hist_content.pack(fill="x", padx=30, pady=30)
-        
-        tk.Label(hist_content, text="Measurement History", fg="#333333", bg="#f0f0f0", 
-                font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-        
-        # Date/Time range inputs for export
-        self.date_from_var = tk.StringVar(value="")
-        self.date_to_var = tk.StringVar(value="")
-
-        range_frame = tk.Frame(hist_content, bg="#f0f0f0")
-        range_frame.pack(fill="x", pady=(0, 10))
-
-        tk.Label(range_frame, text="From:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
-        from_box = tk.Frame(range_frame, bg="#f0f0f0")
-        from_box.pack(side="left", padx=(5, 15))
-        tk.Entry(from_box, textvariable=self.date_from_var, width=22, font=("Arial", 10)).pack(side="left")
-        tk.Button(from_box, text="📅", width=3, command=lambda: DateTimePopup(self, lambda d: self.date_from_var.set(d))).pack(side="left", padx=(6,0))
-
-        tk.Label(range_frame, text="To:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
-        to_box = tk.Frame(range_frame, bg="#f0f0f0")
-        to_box.pack(side="left", padx=(5, 15))
-        tk.Entry(to_box, textvariable=self.date_to_var, width=22, font=("Arial", 10)).pack(side="left")
-        tk.Button(to_box, text="📅", width=3, command=lambda: DateTimePopup(self, lambda d: self.date_to_var.set(d))).pack(side="left", padx=(6,0))
-
-        tk.Button(range_frame, text="📥 Export Range to CSV", bg="#0066cc", fg="white",
-              font=("Arial", 11, "bold"), command=self.export_csv).pack(side="right")
-
-        tk.Frame(hist_content, bg="#f0f0f0").pack(fill="x", pady=5)
-    
-        # ========== TAB: RTD COMPENSATION ==========
-        self.tab_frames["RTD Compensation"] = tk.Frame(self.content_container, bg="#f0f0f0")
-        self.tab_frames["RTD Compensation"].grid(row=0, column=0, sticky="nsew")
-        self.tab_frames["RTD Compensation"].grid_rowconfigure(0, weight=1)
-        self.tab_frames["RTD Compensation"].grid_columnconfigure(0, weight=1)
-
-
-        rtd_content = tk.Frame(self.tab_frames["RTD Compensation"], bg="#f0f0f0")
-        rtd_content.pack(fill="x", padx=30, pady=30)
-
-        tk.Label(rtd_content,text="RTD Compensation Settings",fg="#333333",
-         bg="#f0f0f0",font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
-
-# Checkbox Row
-        rtd_frame = tk.Frame(rtd_content, bg="#f0f0f0")
-        rtd_frame.pack(fill="x", pady=10)
-
-        tk.Label(rtd_frame,text="Enable RTD Compensation:",width=25,anchor="e",
-         bg="#f0f0f0",font=("Arial", 12, "bold")).pack(side="left")
-
-        tk.Checkbutton(rtd_frame,text="Enable",
-            variable=self.temp_rtd_enable, command=self.on_rtd_compensation_changed,
-               bg="#f0f0f0",font=("Arial", 11)).pack(side="left", padx=15)
-    
-    # Save button for RTD Compensation tab
-        rtd_btn_frame = tk.Frame(rtd_content, bg="#f0f0f0")
-        rtd_btn_frame.pack(fill="x", pady=20)
-        tk.Button(rtd_btn_frame, text="✔ SAVE RTD SETTINGS", bg="#4caf50", fg="white", 
-             font=("Arial", 12, "bold"), width=40, height=2,
-             command=lambda: self.save_tab_settings("RTD Compensation")).pack(pady=10)
-        
-        # Show first tab
-        self.show_tab("General")
+    def _create_tabs_ui(self):
+        pass
 
     def save_tab_settings(self, tab_name):
         """Save settings for a specific tab"""
@@ -3175,11 +2742,11 @@ class SettingsFrame(tk.Frame):
         if not hasattr(self, 'tx1_view_row') or not hasattr(self, 'tx2_view_row'):
             return
         if getattr(self, 'active_tx', 1) == 1:
-            self.tx1_view_row.pack(fill="x", pady=8)
-            self.tx2_view_row.pack_forget()
+            self.tx1_view_row.grid()
+            self.tx2_view_row.grid_remove()
         else:
-            self.tx2_view_row.pack(fill="x", pady=8)
-            self.tx1_view_row.pack_forget()
+            self.tx1_view_row.grid_remove()
+            self.tx2_view_row.grid()
 
     def refresh_active_tx_vars(self):
         """Swap all per-TX UI references to match the currently active TX."""
@@ -3304,42 +2871,265 @@ class SettingsFrame(tk.Frame):
         thread.start()
 
     def show_tab(self, tab_name):
-        """Show selected tab and update button colors"""
-        # Hide all tabs
+        """Show selected tab — build its content on first visit, then just raise it."""
+        if not hasattr(self, 'tab_frames'):
+            return
+
+        # Build this tab's content the first time it's visited
+        if tab_name not in self._tabs_built:
+            self._build_tab(tab_name)
+            self._tabs_built.add(tab_name)
+
+        # Hide every tab, show only the requested one
         for frame in self.tab_frames.values():
             frame.grid_remove()
-         # create if not exists
-        if tab_name not in self.tab_frames:
+        if tab_name in self.tab_frames:
+            self.tab_frames[tab_name].grid(row=0, column=0, sticky="nsew")
 
-           frame = tk.Frame(self.content_container, bg="#f0f0f0")
-           frame.pack(fill="both", expand=True)
+        # Sync graph view row whenever Graph tab is shown
+        if tab_name == "Graph":
+            self.refresh_graph_view_row()
 
-        # 👉 SHOW LOADING TEXT IMMEDIATELY
-           loading = tk.Label(frame, text="Loading...",
-                           font=("Arial", 14))
-           loading.pack(pady=50)
+        # Update button highlight — reset previous, highlight current
+        prev = getattr(self, '_active_tab', None)
+        if prev and prev in self.tab_buttons:
+            self.tab_buttons[prev].config(bg="#b0b0b0", relief="raised")
+        if tab_name in self.tab_buttons:
+            self.tab_buttons[tab_name].config(bg="#ffffff", relief="sunken")
+        self._active_tab = tab_name
 
-           self.tab_frames[tab_name] = frame
+        if tab_name == "History":
+            self.refresh_history()
 
-        # 👉 LOAD ACTUAL UI IN BACKGROUND
-           self.after(50, lambda: self._load_tab_content(tab_name, frame))
+    def _make_tab_frame(self, name):
+        """Create, grid, then immediately hide a tab frame."""
+        f = tk.Frame(self.content_container, bg="#f0f0f0")
+        f.grid_rowconfigure(0, weight=1)
+        f.grid_columnconfigure(0, weight=1)
+        # Grid it at (0,0) then hide — show_tab will reveal it
+        f.grid(row=0, column=0, sticky="nsew")
+        f.grid_remove()
+        self.tab_frames[name] = f
+        return f
 
-        else:
-           self.tab_frames[tab_name].pack(fill="both", expand=True)
-        
-        # Show selected tab with proper grid config
-        self.tab_frames[tab_name].grid(row=0, column=0, sticky="nsew")
-        
-        # if we just navigated to history, refresh the list
-        """if tab_name == "History" and hasattr(self, "refresh_history"):"""
-            #self.refresh_history()
-        
-        # Update button colors
-        """for btn_name, btn in self.tab_buttons.items():
-            if btn_name == tab_name:
-                btn.config(bg="#ffffff", relief="sunken")  # Active button
-            else:
-                btn.config(bg="#b0b0b0", relief="raised")  # Inactive button"""
+    def _build_tab(self, name):
+        """Build one tab's widgets on demand."""
+        builders = {
+            "General":          self._build_tab_general,
+            "Graph":            self._build_tab_graph,
+            "Transmitter":      self._build_tab_transmitter,
+            "Outputs":          self._build_tab_outputs,
+            "Troubleshooting":  self._build_tab_troubleshooting,
+            "History":          self._build_tab_history,
+            "RTD Compensation": self._build_tab_rtd,
+        }
+        if name in builders:
+            builders[name]()
+
+    def _build_tab_general(self):
+        f = self._make_tab_frame("General")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="General Settings", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        self.create_entry_row(c, "Station Name:", self.temp_station_name)
+        self.create_static_row(c, "Sensor Type:", "Type B")
+        bf = tk.Frame(c, bg="#f0f0f0"); bf.pack(fill="x", pady=20)
+        tk.Button(bf, text="✔ SAVE GENERAL SETTINGS", bg="#4caf50", fg="white",
+                  font=("Arial", 12, "bold"), width=40, height=2,
+                  command=lambda: self.save_tab_settings("General")).pack(pady=10)
+
+    def _build_tab_graph(self):
+        f = self._make_tab_frame("Graph")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="Graph Settings", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        tk.Label(c, text="Configure time scales and axis modes for live graph display",
+                 font=("Arial", 11), bg="#f0f0f0", fg="#666666").pack(anchor="w", pady=10)
+
+        # Use a container so both rows occupy the same slot — only one shown at a time
+        view_container = tk.Frame(c, bg="#f0f0f0")
+        view_container.pack(fill="x", pady=8)
+
+        self.tx1_view_row = tk.Frame(view_container, bg="#f0f0f0")
+        self.tx1_view_row.grid(row=0, column=0, sticky="ew")
+        view_container.grid_columnconfigure(0, weight=1)
+        tk.Label(self.tx1_view_row, text="Graph View (TX1):", width=20, anchor="e",
+                 bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        ttk.Combobox(self.tx1_view_row, textvariable=self.temp_view_mode,
+                     values=["Digital View", "Graph View"], state="readonly",
+                     font=("Arial", 11), width=25).pack(side="left", padx=15)
+
+        self.tx2_view_row = tk.Frame(view_container, bg="#f0f0f0")
+        self.tx2_view_row.grid(row=0, column=0, sticky="ew")
+        tk.Label(self.tx2_view_row, text="Graph View (TX2):", width=20, anchor="e",
+                 bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        ttk.Combobox(self.tx2_view_row, textvariable=self.temp_view_mode2,
+                     values=["Digital View", "Graph View"], state="readonly",
+                     font=("Arial", 11), width=25).pack(side="left", padx=15)
+
+        self.refresh_graph_view_row()
+        self.create_combobox_row(c, "Time Scale:", self.temp_time_scale,
+                                 ["1 Minute", "5 Minutes", "15 Minutes", "1 Hour"])
+
+        rng = tk.Frame(c, bg="#f0f0f0"); rng.pack(fill="x", pady=10)
+        tk.Label(rng, text="Temperature Range:", width=20, anchor="e",
+                 bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        ri = tk.Frame(rng, bg="#f0f0f0"); ri.pack(side="left", padx=15)
+        tk.Label(ri, text="Min (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        tk.Entry(ri, textvariable=self.temp_y_min, width=10, font=("Arial", 11)).pack(side="left", padx=5)
+        tk.Label(ri, text="Max (°C):", bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        tk.Entry(ri, textvariable=self.temp_y_max, width=10, font=("Arial", 11)).pack(side="left", padx=5)
+
+        mf = tk.Frame(c, bg="#f0f0f0"); mf.pack(fill="x", pady=10)
+        tk.Label(mf, text="Y-Axis Mode:", width=20, anchor="e",
+                 bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        tk.Radiobutton(mf, text="Autoscale", variable=self.temp_y_axis_mode,
+                       value="Autoscale", bg="#f0f0f0", font=("Arial", 12)).pack(side="left", padx=10)
+        tk.Radiobutton(mf, text="Manual", variable=self.temp_y_axis_mode,
+                       value="Manual", bg="#f0f0f0", font=("Arial", 12)).pack(side="left", padx=10)
+
+        bf = tk.Frame(c, bg="#f0f0f0"); bf.pack(fill="x", pady=20)
+        tk.Button(bf, text="✔ SAVE GRAPH SETTINGS", bg="#4caf50", fg="white",
+                  font=("Arial", 12, "bold"), width=40, height=2,
+                  command=lambda: self.save_tab_settings("Graph")).pack(pady=10)
+
+    def _build_tab_transmitter(self):
+        f = self._make_tab_frame("Transmitter")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="Transmitter Information", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        row = tk.Frame(c, bg="#f0f0f0"); row.pack(fill="x", pady=8)
+        tk.Label(row, text="Paired Device:", width=20, anchor="e",
+                 bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        self.tx_id_label = tk.Label(row, textvariable=self.controller.transmitter_id_val,
+                                    fg="#0055aa", bg="#f0f0f0", font=("Arial", 12, "bold"))
+        self.tx_id_label.pack(side="left", padx=15)
+        self.create_static_row(c, "Device Status:", "Connected")
+        bf = tk.Frame(c, bg="#f0f0f0"); bf.pack(fill="x", pady=20)
+        tk.Button(bf, text="✔ SAVE TRANSMITTER SETTINGS", bg="#4caf50", fg="white",
+                  font=("Arial", 12, "bold"), width=40, height=2,
+                  command=lambda: self.save_tab_settings("Transmitter")).pack(pady=10)
+
+    def _build_tab_outputs(self):
+        f = self._make_tab_frame("Outputs")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="Output Port Configuration", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+
+        pf = tk.LabelFrame(c, text="COM Port Settings", bg="#f0f0f0",
+                           font=("Arial", 12, "bold"), padx=15, pady=15)
+        pf.pack(fill="x", pady=10)
+        pr = tk.Frame(pf, bg="#f0f0f0"); pr.pack(fill="x", pady=8)
+        tk.Label(pr, text="Select Output Port:", width=18, anchor="w",
+                 bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=10)
+        self.output_port_combo = ttk.Combobox(pr, width=12, state="readonly", font=("Arial", 10))
+        self.output_port_combo.pack(side="left", padx=10)
+        tk.Button(pr, text="🔄 Refresh", bg="#2196F3", fg="white",
+                  font=("Arial", 10, "bold"), width=15,
+                  command=self.refresh_output_ports).pack(side="left", padx=5)
+
+        br = tk.Frame(pf, bg="#f0f0f0"); br.pack(fill="x", pady=8)
+        tk.Label(br, text="Baud Rate:", width=18, anchor="w",
+                 bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=5)
+        self.output_baud_combo = ttk.Combobox(br,
+                                              values=["9600","19200","38400","57600","115200"],
+                                              state="readonly", width=12, font=("Arial", 10))
+        self.output_baud_combo.pack(side="left", padx=10)
+        self.output_baud_combo.set("115200")
+
+        btf = tk.Frame(c, bg="#f0f0f0"); btf.pack(fill="x", pady=20)
+        self.output_enable_btn = tk.Button(btf, text="✓ ENABLE OUTPUT PORT",
+                                           bg="#4caf50", fg="white",
+                                           font=("Arial", 12, "bold"), width=25, height=2,
+                                           command=self.enable_output_port)
+        self.output_enable_btn.pack(side="left", padx=10)
+
+        nb = ttk.Notebook(c); nb.pack(fill="both", expand=True, pady=10)
+        self.out_notebook = nb
+        tab_tcp = tk.Frame(nb, bg="#f0f0f0"); nb.add(tab_tcp, text="Modbus TCP")
+        tc = tk.Frame(tab_tcp, bg="#f0f0f0"); tc.pack(fill="both", expand=True, padx=20, pady=20)
+        self.create_entry_row(tc, "IP Address:", self.controller.eth_ip)
+        self.create_entry_row(tc, "Port:", self.controller.eth_port)
+
+        bf = tk.Frame(c, bg="#f0f0f0"); bf.pack(fill="x", pady=(0, 10))
+        tk.Button(bf, text="✔ SAVE OUTPUT SETTINGS", bg="#4caf50", fg="white",
+                  font=("Arial", 12, "bold"), width=40, height=2,
+                  command=lambda: self.save_tab_settings("Outputs")).pack(pady=10)
+
+    def _build_tab_troubleshooting(self):
+        f = self._make_tab_frame("Troubleshooting")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="Diagnostic Information", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+
+        df = tk.LabelFrame(c, text="Sensor Diagnostics", bg="#f0f0f0",
+                           font=("Arial", 12, "bold"), padx=15, pady=15)
+        df.pack(fill="x", pady=10)
+        for lbl_text, var_attr, attr_name in [
+            ("Raw ADC Hex:",   "raw_hex",    "diag_raw_hex_lbl"),
+            ("Battery Voltage:", "bat_voltage", "diag_bat_lbl"),
+        ]:
+            row = tk.Frame(df, bg="#f0f0f0"); row.pack(fill="x", pady=8)
+            tk.Label(row, text=lbl_text, width=20, anchor="e",
+                     bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+            lbl = tk.Label(row, textvariable=getattr(self.controller, var_attr),
+                           anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+            lbl.pack(side="left", padx=15)
+            setattr(self, attr_name, lbl)
+
+        pf = tk.LabelFrame(c, text="Port Diagnostics", bg="#f0f0f0",
+                           font=("Arial", 12, "bold"), padx=15, pady=15)
+        pf.pack(fill="x", pady=10)
+        for lbl_text, var_attr, attr_name in [
+            ("Connected Port:",    "com_port_val",        "diag_port_lbl"),
+            ("Connection Status:", "status_msg",          "diag_status_lbl"),
+            ("Transmitter ID:",    "transmitter_id_val",  "diag_txid_lbl"),
+        ]:
+            row = tk.Frame(pf, bg="#f0f0f0"); row.pack(fill="x", pady=8)
+            tk.Label(row, text=lbl_text, width=20, anchor="e",
+                     bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+            lbl = tk.Label(row, textvariable=getattr(self.controller, var_attr),
+                           anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc")
+            lbl.pack(side="left", padx=15)
+            setattr(self, attr_name, lbl)
+
+    def _build_tab_history(self):
+        f = self._make_tab_frame("History")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="Measurement History", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+
+        rf = tk.Frame(c, bg="#f0f0f0"); rf.pack(fill="x", pady=(0, 10))
+        tk.Label(rf, text="From:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
+        fb = tk.Frame(rf, bg="#f0f0f0"); fb.pack(side="left", padx=(5, 15))
+        tk.Entry(fb, textvariable=self.date_from_var, width=22, font=("Arial", 10)).pack(side="left")
+        tk.Button(fb, text="📅", width=3,
+                  command=lambda: DateTimePopup(self, lambda d: self.date_from_var.set(d))
+                  ).pack(side="left", padx=(6, 0))
+        tk.Label(rf, text="To:", bg="#f0f0f0", font=("Arial", 10)).pack(side="left")
+        tb = tk.Frame(rf, bg="#f0f0f0"); tb.pack(side="left", padx=(5, 15))
+        tk.Entry(tb, textvariable=self.date_to_var, width=22, font=("Arial", 10)).pack(side="left")
+        tk.Button(tb, text="📅", width=3,
+                  command=lambda: DateTimePopup(self, lambda d: self.date_to_var.set(d))
+                  ).pack(side="left", padx=(6, 0))
+        tk.Button(rf, text="📥 Export Range to CSV", bg="#0066cc", fg="white",
+                  font=("Arial", 11, "bold"), command=self.export_csv).pack(side="right")
+
+    def _build_tab_rtd(self):
+        f = self._make_tab_frame("RTD Compensation")
+        c = tk.Frame(f, bg="#f0f0f0"); c.pack(fill="x", padx=30, pady=30)
+        tk.Label(c, text="RTD Compensation Settings", fg="#333333", bg="#f0f0f0",
+                 font=("Arial", 14, "bold")).pack(anchor="w", pady=(0, 20))
+        row = tk.Frame(c, bg="#f0f0f0"); row.pack(fill="x", pady=10)
+        tk.Label(row, text="Enable RTD Compensation:", width=25, anchor="e",
+                 bg="#f0f0f0", font=("Arial", 12, "bold")).pack(side="left")
+        tk.Checkbutton(row, text="Enable", variable=self.temp_rtd_enable,
+                       command=self.on_rtd_compensation_changed,
+                       bg="#f0f0f0", font=("Arial", 11)).pack(side="left", padx=15)
+        bf = tk.Frame(c, bg="#f0f0f0"); bf.pack(fill="x", pady=20)
+        tk.Button(bf, text="✔ SAVE RTD SETTINGS", bg="#4caf50", fg="white",
+                  font=("Arial", 12, "bold"), width=40, height=2,
+                  command=lambda: self.save_tab_settings("RTD Compensation")).pack(pady=10)
     
     # ==================== HELPER METHODS ====================
 
@@ -3435,18 +3225,13 @@ class SettingsFrame(tk.Frame):
         tk.Label(f, textvariable=var, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc").pack(side="left", padx=15)
 
     def refresh_history(self):
-        """Populate history listbox from the database instead of the in-memory buffer.
-
-        Displays the most recent 30 measurements using the same format as when
-        data is received.  Conversions are performed using the raw integer
-        fields so that no RTD compensation is accidentally applied.
-        """
-        self.after(50, self.refresh_history)
+        """Populate history listbox from DB — called once when History tab is opened."""
         if not hasattr(self, "history_list"):
             return
-        import threading
         threading.Thread(target=self._refresh_history_bg, daemon=True).start()
-        self.history_list.delete(0, tk.END)
+
+    def _refresh_history_bg(self):
+        """Run DB query in background, then update UI on main thread."""
         try:
             self.controller.cursor.execute(
                 "SELECT timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw "
@@ -3454,115 +3239,86 @@ class SettingsFrame(tk.Frame):
             )
             rows = self.controller.cursor.fetchall()
             self.after(0, lambda: self._update_history_ui(rows))
-            
-            for ts, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw in rows:
-                # format time only for display
-                try:
-                    ts_h = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").strftime("%H:%M:%S")
-                except Exception:
-                    ts_h = ts
-
-                # convert raw thermocouple to temperature without RTD compensation
-                melt_temp = voltage_uV_to_temperature_C(raw_to_voltage_uV(thermo_raw))
-
-                # convert RTD raw to temperature
-                rtd_res = (rtd_raw * 400) / (2 ** 15)
-                try:
-                    rtd_temp_val = RTDTemperatureTable.get_temperature_from_resistance(rtd_res)
-                except Exception:
-                    rtd_temp_val = "--"
-
-                # battery percent calculation (same as dashboard)
-                bat_volt = batt_raw / 1000.0
-                bat_pct = int(round(100.0 * (bat_volt - 3.0) / (4.2 - 3.0)))
-                bat_pct = max(0, min(100, bat_pct))
-
-                entry = (
-                    f"{ts_h} | Melt:{melt_temp}{self.controller.units.get()} | "
-                    f"RTD:{rtd_temp_val} | Bat:{bat_pct}%"
-                )
-                #self.history_list.insert(tk.END, entry)
         except Exception:
-            # silently ignore if DB not ready
             pass
 
     def export_csv(self):
-        """Export measurements to CSV with converted values.
-
-        The output columns follow the specification:
-            Date, Transmitter ID, Melt °C, RTD °C, Device °C, Battery V
-        Conversions are applied using the same formulas as in the display code
-        but *without* RTD compensation for the melt temperature.  The timestamp
-        is reformatted to use a hyphen between date and time.
-        """
+        """Export measurements to CSV with converted values."""
         filename = filedialog.asksaveasfilename(
            defaultextension=".csv",
            filetypes=[("CSV Files", "*.csv")]
         )
-
         if not filename:
             return
 
         try:
-            # Build SQL with optional date range
             s_from = getattr(self, 'date_from_var', tk.StringVar()).get().strip()
-            s_to = getattr(self, 'date_to_var', tk.StringVar()).get().strip()
+            s_to   = getattr(self, 'date_to_var',   tk.StringVar()).get().strip()
 
-            def parse_input_date(s: str, is_start: bool) -> str:
-                # Accepts formats: YYYY-MM-DD-HH:MM:SS, YYYY-MM-DD HH:MM:SS, YYYY-MM-DD
+            def parse_dt(s, is_start):
                 if not s:
                     return None
-                fmts = ["%Y-%m-%d-%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]
-                for fmt in fmts:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d-%H:%M:%S", "%Y-%m-%d"):
                     try:
                         dt = datetime.strptime(s, fmt)
                         if fmt == "%Y-%m-%d":
-                            if is_start:
-                                dt = dt.replace(hour=0, minute=0, second=0)
-                            else:
-                                dt = dt.replace(hour=23, minute=59, second=59)
-                        # DB timestamps use 'YYYY-MM-DD HH:MM:SS'
+                            dt = dt.replace(hour=0, minute=0, second=0) if is_start \
+                                 else dt.replace(hour=23, minute=59, second=59)
                         return dt.strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
                         continue
-                raise ValueError(f"Invalid date format: {s}")
+                raise ValueError(f"Cannot parse date: '{s}'\nExpected format: YYYY-MM-DD HH:MM:SS")
 
             params = []
             where_clauses = []
+
             if s_from:
-                from_ts = parse_input_date(s_from, True)
-                where_clauses.append("timestamp >= ?")
-                params.append(from_ts)
+                from_ts = parse_dt(s_from, True)
+                if from_ts:
+                    where_clauses.append("timestamp >= ?")
+                    params.append(from_ts)
+
             if s_to:
-                to_ts = parse_input_date(s_to, False)
-                where_clauses.append("timestamp <= ?")
-                params.append(to_ts)
+                to_ts = parse_dt(s_to, False)
+                if to_ts:
+                    where_clauses.append("timestamp <= ?")
+                    params.append(to_ts)
 
-            base_sql = "SELECT timestamp,station_name, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi FROM measurements"
-            # filter strictly by tx_index — TX2 never sees TX1 data and vice versa
             tx = getattr(self, 'active_tx', 1)
-            where_clauses.append("COALESCE(tx_index, 1) = ?")
-            params.append(tx)
+            # No tx_index filter — export ALL data in range, TX column shows which transmitter
+            sql = ("SELECT timestamp, station_name, device_id, temp_raw, rtd_raw, "
+                   "thermo_raw, batt_raw, rssi, COALESCE(tx_index,1) FROM measurements")
+            if where_clauses:
+                sql += " WHERE " + " AND ".join(where_clauses)
+            sql += " ORDER BY id ASC"
 
-            sql = base_sql + " WHERE " + " AND ".join(where_clauses) + " ORDER BY id ASC"
+            logger.info(f"CSV export SQL: {sql} | params: {params}")
             self.controller.cursor.execute(sql, params)
             rows = self.controller.cursor.fetchall()
+            logger.info(f"CSV export: {len(rows)} total rows found")
 
-            with open(filename, 'w', newline='', encoding='utf-8') as f:
+            if not rows:
+                messagebox.showwarning(
+                    "No Data",
+                    "No records found in the selected date range."
+                    + (f"\nFrom: {s_from}" if s_from else "")
+                    + (f"\nTo:   {s_to}"   if s_to   else "")
+                )
+                return
+
+            with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    "Date", "Station Name", "Transmitter ID", "MeltTemp_C", "RTDTemp_C",
-                    "DeviceTemp_C", "BatteryVolts", "RSSI"
+                    "Date", "Transmitter", "Station Name", "Transmitter ID",
+                    "MeltTemp_C", "RTDTemp_C", "DeviceTemp_C",
+                    "BatteryVolts", "RSSI"
                 ])
-                for ts, station_name_db, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db in rows:
-                    # date formatting
+                for ts, station_name_db, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db, tx_idx in rows:
                     try:
-                        dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-                        date_str = dt.strftime("%Y-%m-%d-%H:%M:%S")
+                        date_str = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
                     except Exception:
                         date_str = ts
 
-                    # compute temperatures/voltages
                     melt_temp = voltage_uV_to_temperature_C(raw_to_voltage_uV(thermo_raw))
                     rtd_res = (rtd_raw * 400) / (2 ** 15)
                     try:
@@ -3570,23 +3326,23 @@ class SettingsFrame(tk.Frame):
                     except Exception:
                         rtd_temp_val = ""
                     device_temp = temp_raw / 10000.0
-                    batt_volt = batt_raw / 1000.0
-                    rssi_str = f"{rssi_db} dBm" if rssi_db else "--"
-
+                    batt_volt   = batt_raw / 1000.0
+                    rssi_str    = f"{rssi_db} dBm" if rssi_db is not None else "--"
 
                     writer.writerow([
-                        date_str, station_name_db, dev_id, melt_temp, rtd_temp_val,
-                        device_temp, batt_volt, rssi_str
+                        date_str, f"TX{tx_idx}", station_name_db, dev_id,
+                        f"{melt_temp:.2f}", rtd_temp_val,
+                        f"{device_temp:.2f}", f"{batt_volt:.3f}", rssi_str
                     ])
 
-            messagebox.showinfo("Export Success", f"Data exported to {filename}")
+            messagebox.showinfo("Export Success", f"Exported {len(rows)} rows to:\n{filename}")
 
         except Exception as e:
             messagebox.showerror("Export Error", str(e))
-            logger.error(f"Output write error: {e}")
+            logger.error(f"CSV export error: {e}", exc_info=True)
 
     """def save_and_exit(self):
-        # apply updated graph buffer size based on time scale
+        # apply updated graph buffer size based on time scalew
         try:
             self.controller.update_buffer_size()
         except Exception:
