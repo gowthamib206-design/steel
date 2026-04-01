@@ -2047,6 +2047,9 @@ class DashboardFrame(tk.Frame):
             if self.controller.rssi_val.get() == "":
                 self.controller.rssi_val.set("--")
 
+        # Check and update alert boxes
+        self._check_alerts(data)
+
         
     
     def _check_alerts(self, data):
