@@ -1048,7 +1048,7 @@ class SensorGUI(tk.Tk):
         
         # Graph/History data variables
         self.buffer_size = 20
-        self.temp_data = deque([0] * self.buffer_size, maxlen=self.buffer_size)
+        self.temp_data = deque(maxlen=self.buffer_size)
         self.time_data = deque(maxlen=self.buffer_size)
         self.history_display = deque(maxlen=30)
 
@@ -1617,9 +1617,15 @@ class DashboardFrame(tk.Frame):
         """Redraw live graph"""
         if not self.controller.time_data:
             return
-        start_time = self.controller.time_data[0]
-        x = [(t - start_time).total_seconds() for t in self.controller.time_data]
-        y = list(self.controller.temp_data)
+        time_list = list(self.controller.time_data)
+        temp_list = list(self.controller.temp_data)
+        # Ensure x and y are the same length to avoid broadcast shape mismatch
+        n = min(len(time_list), len(temp_list))
+        time_list = time_list[-n:]
+        temp_list = temp_list[-n:]
+        start_time = time_list[0]
+        x = [(t - start_time).total_seconds() for t in time_list]
+        y = temp_list
         if not x:
             return
         try:
