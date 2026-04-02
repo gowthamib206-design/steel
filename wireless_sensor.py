@@ -3252,7 +3252,7 @@ class SettingsFrame(tk.Frame):
                     "Date", "Station Name", "Transmitter ID", "MeltTemp_C", "RTDTemp_C",
                     "DeviceTemp_C", "BatteryVolts", "RSSI"
                 ])
-                for ts, dev_id, station_name_db, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db in rows:
+                for ts, station_name_db, dev_id, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi_db in rows:
                     # date formatting
                     try:
                         dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
