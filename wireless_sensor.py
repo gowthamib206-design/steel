@@ -446,7 +446,7 @@ class SerialPortManager:
             if self.serial and self.serial.is_open:
                 self.serial.close()
             
-            self.serial = serial.Serial(port, baudrate, timeout=1)
+            self.serial = serial.Serial(port, baudrate, timeout=0)
             self.input_serial = self.serial  # Also set input_serial for backward compatibility
             self.is_open = True
             self.input_is_open = True
@@ -1089,10 +1089,9 @@ class SensorGUI(tk.Tk):
             pass
         
         self.frames = {}
-        for F in (DashboardFrame, SettingsFrame):
-            frame = F(parent=self.container, controller=self)
-            self.frames[F.__name__] = frame
-            frame.grid(row=0, column=0, sticky="nsew")
+        frame = DashboardFrame(parent=self.container, controller=self)
+        self.frames["DashboardFrame"] = frame
+        frame.grid(row=0, column=0, sticky="nsew")
         
         self.show_frame("DashboardFrame")
     
@@ -1106,6 +1105,7 @@ class SensorGUI(tk.Tk):
         """
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
+        self._db_lock = threading.Lock()
         
         # Check if the old schema exists (no device_id column)
         try:
@@ -1158,17 +1158,18 @@ class SensorGUI(tk.Tk):
         """
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         try:
-            self.cursor.execute(
-                "INSERT INTO measurements (timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (ts, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi)
-            )
-            # commit every 10 records instead of every single one
-            if not hasattr(self, '_commit_counter'):
-                self._commit_counter = 0
-            self._commit_counter += 1
-            if self._commit_counter >= 10:
-                self.conn.commit()
-                self._commit_counter = 0
+            with self._db_lock:
+                self.cursor.execute(
+                    "INSERT INTO measurements (timestamp, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (ts, device_id, station_name, temp_raw, rtd_raw, thermo_raw, batt_raw, rssi)
+                )
+                # commit every 10 records instead of every single one
+                if not hasattr(self, '_commit_counter'):
+                    self._commit_counter = 0
+                self._commit_counter += 1
+                if self._commit_counter >= 10:
+                    self.conn.commit()
+                    self._commit_counter = 0
             logger.debug(f"Logged measurement: {station_name} | {device_id} | RSSI: {rssi}")
         except Exception as exc:
             logger.error(f"Database error: {exc}")
@@ -1210,6 +1211,11 @@ class SensorGUI(tk.Tk):
 
     def show_frame(self, name):
         """Show specified frame"""
+        if name not in self.frames:
+            if name == "SettingsFrame":
+                frame = SettingsFrame(parent=self.container, controller=self)
+                self.frames[name] = frame
+                frame.grid(row=0, column=0, sticky="nsew")
         frame = self.frames[name]
         frame.tkraise()
         # after raising, give the new page a chance to update its layout or data
@@ -1450,19 +1456,29 @@ class DashboardFrame(tk.Frame):
         
     def check_paired_device_password(self):
         """Check password for Paired Device button"""
+        was_reading = self.controller.is_reading
+        self.controller.is_reading = False
         password = simpledialog.askstring("Security", "Enter Password for Paired Device:", show='*')
         if password == "1111":
             self.open_paired_device_settings()
         elif password is not None:
             messagebox.showerror("Access Denied", "Incorrect Password")
+        self.controller.is_reading = was_reading
+        if was_reading:
+            self.after(20, self._read_data)
 
     def check_configuration_password(self):
         """Check password for Configuration button"""
+        was_reading = self.controller.is_reading
+        self.controller.is_reading = False
         password = simpledialog.askstring("Security", "Enter Configuration Password:", show='*')
         if password == "1111":
             self.controller.show_frame("SettingsFrame")
         elif password is not None:
             messagebox.showerror("Access Denied", "Incorrect Password")
+        self.controller.is_reading = was_reading
+        if was_reading:
+            self.after(20, self._read_data)
 
     def open_paired_device_settings(self):
         """Open paired device connection window"""
@@ -1630,19 +1646,21 @@ class DashboardFrame(tk.Frame):
             return
         try:
             self.line.set_data(x, y)
-            self.ax.relim()
             # Set x-axis limit based on time scale
             scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}
             max_time = scale_map.get(self.controller.time_scale_str.get(), 60)
             self.ax.set_xlim(0, max_time)
             if self.controller.y_axis_mode.get() == "Manual":
                 try:
+                    self.ax.autoscale(enable=False, axis='y')
                     self.ax.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
                 except Exception:
                     pass
             else:
                 self.ax.autoscale(enable=True, axis='y')
-            self.canvas.draw()
+                self.ax.relim()
+                self.ax.autoscale_view()
+            self.canvas.draw_idle()
         except Exception:
             pass
 
@@ -1728,10 +1746,14 @@ class DashboardFrame(tk.Frame):
 
     def update_ports(self):
         """Update available ports"""
-        ports = self.controller.port_manager.get_available_ports()
-        self.combo['values'] = ports if ports else []
-        if ports:
-            self.combo.current(0)
+        def _scan():
+            ports = self.controller.port_manager.get_available_ports()
+            def _update():
+                self.combo['values'] = ports if ports else []
+                if ports:
+                    self.combo.current(0)
+            self.after(0, _update)
+        threading.Thread(target=_scan, daemon=True).start()
     
 
     def _read_data(self):
@@ -1760,130 +1782,71 @@ class DashboardFrame(tk.Frame):
                packet,
                enable_rtd_compensation=self.controller.apply_rtd_compensation.get()
            )
-           # Update all main UI labels with parsed values (including raw)
-           # Device temperature
-           device_temp = getattr(data, "temperature", None)
-           if device_temp is not None:
-               self.controller.current_temp.set(f"{device_temp:.1f}")
-           else:
-               self.controller.current_temp.set("--")
-
-           # RTD temperature
-           rtd_temp = getattr(data, "rtd_temperature", None)
-           if rtd_temp is not None:
-               self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
-           else:
-               self.controller.rtd_temp.set("--")
-
-           # RTD resistance
-           rtd_res = getattr(data, "rtd_resistance", None)
-           if rtd_res is not None:
-               self.controller.rtd_resistance = f"{rtd_res:.2f} Ω"
-           else:
-               self.controller.rtd_resistance = "--"
-
-           # Thermocouple temperature
+           # Update thermocouple (melt temp), RSSI, battery — needed for display regardless of filter
            tc = getattr(data, "thermocouple", None)
            if tc is not None:
                self.controller.thermo_val.set(f"{tc:.1f}")
-           else:
-               self.controller.thermo_val.set("--")
-
-           # Thermocouple voltage (uV)
-           tc_uv = getattr(data, "thermocouple_voltage_uv", None)
-           if tc_uv is not None:
-               self.controller.tc_uv = f"{tc_uv:.0f} µV"
-           else:
-               self.controller.tc_uv = "--"
-
-           # Battery voltage
            batt = getattr(data, "battery_voltage", None)
            if batt is not None:
                self.controller.battery_val.set(f"{batt:.2f}V")
                self.controller.bat_voltage.set(f"{batt:.2f}V")
-           else:
-               self.controller.battery_val.set("--")
-               self.controller.bat_voltage.set("--")
-
-           # RSSI
            rssi = getattr(data, "rssi", None)
            if rssi is not None:
                try:
                    self.controller.rssi_val.set(f"{float(rssi):.0f} dBm")
                except Exception:
                    self.controller.rssi_val.set(str(rssi))
-           else:
-               if self.controller.rssi_val.get() == "":
-                   self.controller.rssi_val.set("--")
-
-           # Device ID
-           dev_id = getattr(data, "device_id", None)
-           if dev_id is not None:
-               self.controller.transmitter_id_val.set(str(dev_id))
-
-           # Raw packet
-           raw_packet = getattr(data, "raw_packet", None)
-           if raw_packet:
-               self.controller.raw_hex.set(" ".join(f"{b:02x}" for b in raw_packet))
-           else:
-               self.controller.raw_hex.set("--")
         except Exception as exc:
            logger.error(f"Error parsing packet (RTD compensation: {self.controller.apply_rtd_compensation.get()}): {exc}", exc_info=True)
-           return   # Exit only if parsing completely fails
+           return
         
         # ===============================
 # TRANSMITTER DISCOVERY & FILTERING
 # ===============================
         tx_id = getattr(data, "device_id", None)
-        
-        try:
-           conn = getattr(self, "connection_window", None)
-
-           if conn and tx_id:
+        if tx_id:
             tx_id = str(tx_id)
 
-            # Check if connection window is still valid (not destroyed)
-            try:
-                conn.winfo_exists()
-            except tk.TclError:
-                conn = None
+        try:
+           conn = getattr(self, "connection_window", None)
+           conn_valid = False
+           if conn:
+               try:
+                   conn_valid = conn.winfo_exists()
+               except tk.TclError:
+                   conn_valid = False
+                   conn = None
 
-            if conn and conn.winfo_exists():
-              # Add to list if new
+           if conn and conn_valid and tx_id:
+              # Only do discovery work if this is a new transmitter
               if tx_id not in conn.tx_ids:
                 conn.tx_ids.append(tx_id)
                 try:
                     conn.tx_combo["values"] = conn.tx_ids
                 except tk.TclError:
                     logger.warning("tx_combo widget no longer exists")
-                #logger.info(f"Discovered new transmitter: {tx_id}")
-
-              # Auto-select first TX
-              if len(conn.tx_ids) == 1:
+              # Auto-select only once (when list has exactly 1 entry)
+              if len(conn.tx_ids) == 1 and conn.selected_tx is None:
                 try:
                     conn.tx_combo.current(0)
                     conn.selected_tx = tx_id
                     self.controller.transmitter_id_val.set(tx_id)
                     logger.info(f"Auto-selected first transmitter: {tx_id}")
                 except tk.TclError:
-                    logger.warning("Cannot update tx_combo - window may have closed")
                     conn.selected_tx = tx_id
                     self.controller.transmitter_id_val.set(tx_id)
-            else:
-              # Connection window closed, just store TX ID
-              if tx_id not in getattr(conn, "tx_ids", []):
-                if not hasattr(self, "_discovered_tx_ids"):
-                    self._discovered_tx_ids = []
-                if tx_id not in self._discovered_tx_ids:
-                    self._discovered_tx_ids.append(tx_id)
-                    logger.info(f"Discovered transmitter (offline): {tx_id}")
-                    # If dashboard has no transmitter selected yet, show this one
-                    cur = self.controller.transmitter_id_val.get()
-                    if not cur or cur in ("WAITING", "NOT PAIRED"):
-                        try:
-                            self.controller.transmitter_id_val.set(tx_id)
-                        except Exception:
-                            pass
+           elif tx_id:
+              # Connection window not open — store discovered IDs
+              if not hasattr(self, "_discovered_tx_ids"):
+                  self._discovered_tx_ids = []
+              if tx_id not in self._discovered_tx_ids:
+                  self._discovered_tx_ids.append(tx_id)
+                  cur = self.controller.transmitter_id_val.get()
+                  if not cur or cur in ("WAITING", "NOT PAIRED"):
+                      try:
+                          self.controller.transmitter_id_val.set(tx_id)
+                      except Exception:
+                          pass
         except Exception as exc:
            logger.warning(f"Error in transmitter discovery: {exc}", exc_info=True)
         
@@ -1978,14 +1941,13 @@ class DashboardFrame(tk.Frame):
             except Exception:
                rssi_int = 0
 
-            self.controller.log_to_db(station_name,dev_id,temp_int,
-            rtd_int,thermo_int,batt_int,rssi_int
-        )
+            threading.Thread(target=self.controller.log_to_db, args=(station_name,dev_id,temp_int,
+            rtd_int,thermo_int,batt_int,rssi_int), daemon=True).start()
             # Send packet to serial port
             logger.debug(f"[DASHBOARD] Writing packet to output port: {pkt}")
-            self.controller.port_manager.write_byte(bytes(pkt))
+            threading.Thread(target=self.controller.port_manager.write_byte, args=(bytes(pkt),), daemon=True).start()
 
-            # Update graph if in graph view
+            # Update graph if in graph view (once only)
             if self.controller.view_mode.get() == "Graph View" and "DashboardFrame" in self.controller.frames:
                 self.controller.frames["DashboardFrame"].update_graph()
 
@@ -1994,11 +1956,6 @@ class DashboardFrame(tk.Frame):
             self.controller.history_display.appendleft(
                 f"{ts} | Melt:{new_val}{self.controller.units.get()} | RTD:{rtd_temp} | Bat:{bat_pct}% | {rssi}dBm"
             )
-            if "DashboardFrame" in self.controller.frames:
-                try:
-                    self.controller.frames["DashboardFrame"].update_graph()
-                except Exception:
-                    pass
                 
 # 
 # Valid thermocouple temperature
@@ -2300,6 +2257,9 @@ class ConnectionSettings(tk.Toplevel):
 
         self.protocol("WM_DELETE_WINDOW", self.on_window_close)
 
+        # Force window to render all labels before anything blocks
+        self.update_idletasks()
+
         # Ensure popup is shown before the password dialog
         self.lift()
         self.focus_force()
@@ -2354,7 +2314,12 @@ class ConnectionSettings(tk.Toplevel):
 
     def ask_password(self):
         """Prompt for password; enable controls only if correct."""
+        was_reading = self.dashboard.controller.is_reading
+        self.dashboard.controller.is_reading = False
         pwd = simpledialog.askstring("Security", "Enter Password:", show='*', parent=self)
+        self.dashboard.controller.is_reading = was_reading
+        if was_reading:
+            self.dashboard.after(20, self.dashboard._read_data)
         if pwd == "1111":
             self.enable_controls()
         elif pwd is None:
@@ -3018,6 +2983,7 @@ class SettingsFrame(tk.Frame):
                     self.controller.port_manager.serial.is_open):
                     cmd = b'RTD_ON\n' if enabled else b'RTD_OFF\n'
                     self.controller.port_manager.serial.write(cmd)
+                    
                     logger.info(f"RTD command sent to hardware: {cmd.decode().strip()}")
             except Exception  as exc:
                 logger.error(f"Error sending RTD command: {exc}")
@@ -3028,9 +2994,15 @@ class SettingsFrame(tk.Frame):
 
     def show_tab(self, tab_name):
         """Show selected tab and update button colors"""
-        # Hide all tabs
-        for frame in self.tab_frames.values():
-            frame.grid_remove()
+        # On first call hide all tabs, afterwards only hide the previous one
+        if not hasattr(self, '_current_tab'):
+            for frame in self.tab_frames.values():
+                frame.grid_remove()
+        else:
+            current = self._current_tab
+            if current and current in self.tab_frames and current != tab_name:
+                self.tab_frames[current].grid_remove()
+        self._current_tab = tab_name
         
         # Show selected tab with proper grid config
         self.tab_frames[tab_name].grid(row=0, column=0, sticky="nsew")
@@ -3050,34 +3022,25 @@ class SettingsFrame(tk.Frame):
 
     def refresh_output_ports(self):
        """Refresh available ports in the Outputs tab, excluding connected port"""
-    # Get current connected port
-       connected_port = self.controller.com_port_val.get()
-    
-    # Get all available ports
-       all_ports = self.controller.port_manager.get_available_ports(exclude_connected=False)
-    
-    # Manually filter out the connected port if one is connected
-       filtered_ports = []
-       if connected_port and connected_port != "NOT CONNECTED":
-        # Extract device name (e.g., "COM8" from "COM8 - USB Serial Port")
-          connected_device = connected_port.split(" - ")[0].strip()
-          filtered_ports = [p for p in all_ports if not p.startswith(connected_device)]
-          #logger.info(f"Excluded connected port: {connected_device}")
-       else:
-        # No port connected, show all ports
-          filtered_ports = all_ports
-    
-    # Populate the dropdown
-       self.output_port_combo["values"] = filtered_ports if filtered_ports else []
-    
-    # Clear selection (don't auto-select)
-       if not self.output_port_combo.get():
-          try:
-             self.output_port_combo.current(0)
-          except Exception:
-             pass
-    
-       logger.info(f"Output ports refreshed: {len(filtered_ports)} available (connected: {connected_port})")
+       def _scan():
+           connected_port = self.controller.com_port_val.get()
+           all_ports = self.controller.port_manager.get_available_ports(exclude_connected=False)
+           filtered_ports = []
+           if connected_port and connected_port != "NOT CONNECTED":
+               connected_device = connected_port.split(" - ")[0].strip()
+               filtered_ports = [p for p in all_ports if not p.startswith(connected_device)]
+           else:
+               filtered_ports = all_ports
+           def _update():
+               self.output_port_combo["values"] = filtered_ports if filtered_ports else []
+               if not self.output_port_combo.get():
+                   try:
+                       self.output_port_combo.current(0)
+                   except Exception:
+                       pass
+               logger.info(f"Output ports refreshed: {len(filtered_ports)} available (connected: {connected_port})")
+           self.after(0, _update)
+       threading.Thread(target=_scan, daemon=True).start()
     def enable_output_port(self):
        """Enable/toggle output port connection"""
        try:
@@ -3086,25 +3049,29 @@ class SettingsFrame(tk.Frame):
                if not port_str:
                   messagebox.showerror("Error", "Select an output port")
                   return
-            
                baud = self.output_baud_combo.get() or "115200"
-            
-               success, msg = self.controller.port_manager.open_output_port(port_str, int(baud))
-               if success:
-                  messagebox.showinfo("Success", msg)
-                  #logger.info(msg)
-               else:
-                   messagebox.showerror("Error", msg)
+               def _open():
+                   success, msg = self.controller.port_manager.open_output_port(port_str, int(baud))
+                   def _done():
+                       if success:
+                           messagebox.showinfo("Success", msg)
+                       else:
+                           messagebox.showerror("Error", msg)
+                   self.after(0, _done)
+               threading.Thread(target=_open, daemon=True).start()
            else:
-              success, msg = self.controller.port_manager.close_output_port()
-              if success:
-                messagebox.showinfo("Success", msg)
-                #logger.info(msg)
-              else:
-                messagebox.showerror("Error", msg)
+               def _close():
+                   success, msg = self.controller.port_manager.close_output_port()
+                   def _done():
+                       if success:
+                           messagebox.showinfo("Success", msg)
+                       else:
+                           messagebox.showerror("Error", msg)
+                   self.after(0, _done)
+               threading.Thread(target=_close, daemon=True).start()
        except Exception as e:
-        logger.error(f"Error toggling output port: {e}", exc_info=True)
-        messagebox.showerror("Error", f"Failed to toggle output port:\n{e}")
+           logger.error(f"Error toggling output port: {e}", exc_info=True)
+           messagebox.showerror("Error", f"Failed to toggle output port:\n{e}")
     
 
     # ============================================
@@ -3140,15 +3107,13 @@ class SettingsFrame(tk.Frame):
         tk.Label(f, textvariable=var, anchor="w", bg="#f0f0f0", font=("Courier New", 12), fg="#0066cc").pack(side="left", padx=15)
 
     def refresh_history(self):
-        """Populate history listbox from the database instead of the in-memory buffer.
-
-        Displays the most recent 30 measurements using the same format as when
-        data is received.  Conversions are performed using the raw integer
-        fields so that no RTD compensation is accidentally applied.
-        """
+        """Populate history listbox from the database instead of the in-memory buffer."""
         if not hasattr(self, "history_list"):
             return
-        self.history_list.delete(0, tk.END)
+        threading.Thread(target=self._refresh_history_bg, daemon=True).start()
+
+    def _refresh_history_bg(self):
+        """Run history DB query in background to avoid blocking the UI."""
         try:
             self.controller.cursor.execute(
                 "SELECT timestamp, device_id, temp_raw, rtd_raw, thermo_raw, batt_raw "
@@ -3293,8 +3258,12 @@ class SettingsFrame(tk.Frame):
      
     
     def check_password_for_exit(self):
-        
+        was_reading = self.controller.is_reading
+        self.controller.is_reading = False
         password = simpledialog.askstring("Confirm", "Enter Password to Confirm:", show='*')
+        self.controller.is_reading = was_reading
+        if was_reading:
+            self.controller.frames["DashboardFrame"].after(20, self.controller.frames["DashboardFrame"]._read_data)
         if password == "1111":
             self.exit_settings()
         elif password is not None:
@@ -3305,6 +3274,7 @@ def main():
     """Main entry point"""
     app = SensorGUI()
     app.mainloop()
+    
 
 
 if __name__ == "__main__":
