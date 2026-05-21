@@ -1049,7 +1049,6 @@ class SensorGUI(tk.Tk):
         # Graph/History data variables
         self.buffer_size = 20
         self.temp_data = deque(maxlen=self.buffer_size)
-        self.rtd_data = deque(maxlen=self.buffer_size)
         self.time_data = deque(maxlen=self.buffer_size)
         self.history_display = deque(maxlen=30)
 
@@ -1208,7 +1207,6 @@ class SensorGUI(tk.Tk):
         if new_len != self.buffer_size:
             self.buffer_size = new_len
             self.temp_data = deque(self.temp_data, maxlen=self.buffer_size)
-            self.rtd_data = deque(self.rtd_data, maxlen=self.buffer_size)
             self.time_data = deque(self.time_data, maxlen=self.buffer_size)
 
     def show_frame(self, name):
@@ -1323,9 +1321,7 @@ class DashboardFrame(tk.Frame):
         self.ax.grid(True, linestyle='--', alpha=0.5)
         self.ax.set_xlabel("Time (seconds)", fontsize=12, color='#666666')
         self.ax.set_ylabel("Melt Temperature (°C)", fontsize=12, color='#666666')
-        self.line, = self.ax.plot([], [], 'r-', linewidth=3, label='Melt Temp')
-        self.rtd_line, = self.ax.plot([], [], 'b-', linewidth=2, label='RTD Temp')
-        self.ax.legend(loc='upper left', fontsize=10)
+        self.line, = self.ax.plot([], [], 'r-', linewidth=3)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.thermo_val,
@@ -1639,7 +1635,6 @@ class DashboardFrame(tk.Frame):
             return
         time_list = list(self.controller.time_data)
         temp_list = list(self.controller.temp_data)
-        rtd_list = list(self.controller.rtd_data)
         # Ensure x and y are the same length to avoid broadcast shape mismatch
         n = min(len(time_list), len(temp_list))
         time_list = time_list[-n:]
@@ -1651,12 +1646,6 @@ class DashboardFrame(tk.Frame):
             return
         try:
             self.line.set_data(x, y)
-            # Plot RTD line — align to same time axis
-            n_rtd = min(len(x), len(rtd_list))
-            if n_rtd > 0:
-                self.rtd_line.set_data(x[-n_rtd:], rtd_list[-n_rtd:])
-            else:
-                self.rtd_line.set_data([], [])
             # Set x-axis limit based on time scale
             scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}
             max_time = scale_map.get(self.controller.time_scale_str.get(), 60)
@@ -1711,7 +1700,7 @@ class DashboardFrame(tk.Frame):
                 self.controller.serial = self.controller.port_manager.serial
                 self.controller.status_msg.set("Connected")
                 self.is_connected = True
-
+                
                 # Send RTD setting
                 self.send_rtd_compensation_command(self.controller.apply_rtd_compensation.get())
                 
@@ -1752,17 +1741,6 @@ class DashboardFrame(tk.Frame):
         self.controller.serial = None
         self.controller.status_msg.set("Disconnected")
         logger.info("Port closed")
-
-        # Close PCM file if open
-        pcm_file = getattr(self, "_pcm_file", None)
-        if pcm_file:
-            try:
-                pcm_file.close()
-                logger.info("Closed PCM file")
-            except Exception as exc:
-                logger.error(f"Error closing PCM file: {exc}")
-            self._pcm_file = None
-
         messagebox.showinfo("Disconnected", "Port closed")
         self.is_connected = False
 
@@ -1798,20 +1776,7 @@ class DashboardFrame(tk.Frame):
     def _process_data(self, packet):
         """Process sensor data and update UI"""
 
-        # -------- SAVE 16-BYTE PACKET TO TIMESTAMPED PCM FILE --------
-        try:
-            if not hasattr(self, "_pcm_file") or self._pcm_file is None:
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                pcm_filename = f"sensor_{ts}.pcm"
-                self._pcm_file = open(pcm_filename, "wb", buffering=0)
-                logger.info(f"Opened PCM file: {pcm_filename}")
-            if len(packet) == 16:
-                self._pcm_file.write(bytes(packet))
-        except Exception as exc:
-            logger.error(f"Error writing PCM file: {exc}")
-
     # -------- PARSE DATA --------
-        print(f"[SERIAL RX 16 bytes] {' '.join(f'{b:02X}' for b in packet)}")
         try:
            data = self.controller.data_parser.parse_packet(
                packet,
@@ -1936,12 +1901,6 @@ class DashboardFrame(tk.Frame):
         if new_val is not None:
             self.controller.temp_data.append(new_val)
             self.controller.time_data.append(datetime.now())
-            # Also track RTD temperature for graph
-            if rtd_temp is not None:
-                try:
-                    self.controller.rtd_data.append(float(rtd_temp))
-                except Exception:
-                    pass
 
             # compute battery pct if voltage available
             bat_pct = None
