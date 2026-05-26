@@ -1047,7 +1047,7 @@ class SensorGUI(tk.Tk):
         self.init_db()
         
         # Graph/History data variables
-        self.buffer_size = 20
+        self.buffer_size = 60
         self.temp_data = deque(maxlen=self.buffer_size)
         self.rtd_data = deque(maxlen=self.buffer_size)   # RTD temperature history
         self.time_data = deque(maxlen=self.buffer_size)
@@ -1204,10 +1204,12 @@ class SensorGUI(tk.Tk):
         """Recalculate in-memory buffers when time scale changes"""
         scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "30 Minutes": 1800, "1 Hour": 3600}
         seconds = scale_map.get(self.time_scale_str.get(), 60)
-        new_len = int(seconds / 3)
+        # Store enough points to cover the window at ~1 packet/sec (generous upper bound)
+        new_len = max(60, seconds)
         if new_len != self.buffer_size:
             self.buffer_size = new_len
             self.temp_data = deque(self.temp_data, maxlen=self.buffer_size)
+            self.rtd_data = deque(self.rtd_data, maxlen=self.buffer_size)
             self.time_data = deque(self.time_data, maxlen=self.buffer_size)
 
     def show_frame(self, name):
@@ -1314,19 +1316,33 @@ class DashboardFrame(tk.Frame):
         
         # Prepare graph frame (hidden until needed)
         self.graph_frame = tk.Frame(self, bg="white")
-        self.fig = Figure(figsize=(8, 3), dpi=100)
+        # Create a figure with 2 subplots side by side
+        self.fig = Figure(figsize=(12, 4), dpi=100)
         self.fig.patch.set_facecolor('#ffffff')
-        self.ax = self.fig.add_subplot(111)
-        self.ax.set_title("Process Trend (Live)", fontsize=14, color='#666666')
-        self.ax.set_facecolor('#f9f9f9')
-        self.ax.grid(True, linestyle='--', alpha=0.5)
-        self.ax.set_xlabel("Time (seconds)", fontsize=12, color='#666666')
-        self.ax.set_ylabel("Melt Temperature (°C)", fontsize=12, color='#666666')
-        self.line, = self.ax.plot([], [], 'r-', linewidth=3)
+        self.ax_melt = self.fig.add_subplot(1, 2, 1)
+        self.ax_melt.set_title("Melt Temperature", fontsize=14, color='#d40000')
+        self.ax_melt.set_facecolor('#f9f9f9')
+        self.ax_melt.grid(True, linestyle='--', alpha=0.5)
+        self.ax_melt.set_xlabel("Time (s)", fontsize=12, color='#666666')
+        self.ax_melt.set_ylabel("Melt Temp (°C)", fontsize=12, color='#d40000')
+        self.ax_melt.set_ylim(0, 1850)
+        self.line_melt, = self.ax_melt.plot([], [], 'r-', linewidth=3, label="Melt Temp")
+
+        self.ax_rtd = self.fig.add_subplot(1, 2, 2)
+        self.ax_rtd.set_title("RTD Temperature", fontsize=14, color='#0066cc')
+        self.ax_rtd.set_facecolor('#f9f9f9')
+        self.ax_rtd.grid(True, linestyle='--', alpha=0.5)
+        self.ax_rtd.set_xlabel("Time (s)", fontsize=12, color='#666666')
+        self.ax_rtd.set_ylabel("RTD Temp (°C)", fontsize=12, color='#0066cc')
+        self.ax_rtd.set_ylim(0, 600)
+        self.line_rtd, = self.ax_rtd.plot([], [], 'b-', linewidth=2, label="RTD Temp")
+
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.graph_frame)
         self.canvas.get_tk_widget().pack(fill="both", expand=True)
         self.lbl_graph_overlay = tk.Label(self.graph_frame, textvariable=controller.thermo_val,
-                          bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
+                  bg="white", fg="#d40000", font=("Arial", 40, "bold"), highlightthickness=1)
+        self.lbl_rtd_overlay = tk.Label(self.graph_frame, textvariable=controller.rtd_temp,
+                  bg="white", fg="#0066cc", font=("Arial", 40, "bold"), highlightthickness=1)
 
         # Temperature display area (large)
         temp_display_area = tk.Frame(self.main_container, bg="#ffffff")
@@ -1621,49 +1637,52 @@ class DashboardFrame(tk.Frame):
         except Exception:
             pass
         self.lbl_graph_overlay.place_forget()
+        self.lbl_rtd_overlay.place_forget()
         if self.controller.view_mode.get() == "Digital View":
             self.main_container.grid(row=1, column=0, sticky="nsew")
             self.bottom_container.grid(row=2, column=0, sticky="ew")
         else:
             self.graph_frame.grid(row=1, column=0, sticky="nsew")
-            self.lbl_graph_overlay.place(relx=0.95, rely=0.05, anchor="ne")
+            self.lbl_graph_overlay.place(relx=0.47, rely=0.05, anchor="ne")
+            self.lbl_rtd_overlay.place(relx=0.97, rely=0.05, anchor="ne")
             self.bottom_container.grid(row=2, column=0, sticky="ew")
             self.update_graph()
 
     def update_graph(self):
-        """Redraw live graph"""
+        """Redraw live graph with two separate side-by-side plots for melt temp and RTD"""
         if not self.controller.time_data:
             return
         time_list = list(self.controller.time_data)
         temp_list = list(self.controller.temp_data)
-        # Ensure x and y are the same length to avoid broadcast shape mismatch
-        n = min(len(time_list), len(temp_list))
+        rtd_list = list(self.controller.rtd_data)
+        n = min(len(time_list), len(temp_list), len(rtd_list))
+        if n == 0:
+            return
         time_list = time_list[-n:]
         temp_list = temp_list[-n:]
+        rtd_list = rtd_list[-n:]
         start_time = time_list[0]
         x = [(t - start_time).total_seconds() for t in time_list]
-        y = temp_list
-        if not x:
-            return
-        try:
-            self.line.set_data(x, y)
-            # Set x-axis limit based on time scale
-            scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "1 Hour": 3600}
-            max_time = scale_map.get(self.controller.time_scale_str.get(), 60)
-            self.ax.set_xlim(0, max_time)
-            if self.controller.y_axis_mode.get() == "Manual":
-                try:
-                    self.ax.autoscale(enable=False, axis='y')
-                    self.ax.set_ylim(self.controller.y_min.get(), self.controller.y_max.get())
-                except Exception:
-                    pass
-            else:
-                self.ax.autoscale(enable=True, axis='y')
-                self.ax.relim()
-                self.ax.autoscale_view()
-            self.canvas.draw_idle()
-        except Exception:
-            pass
+
+        # Fixed rolling window based on selected time scale
+        scale_map = {"1 Minute": 60, "5 Minutes": 300, "15 Minutes": 900, "30 Minutes": 1800, "1 Hour": 3600}
+        window = scale_map.get(self.controller.time_scale_str.get(), 60)
+        x_max = max(x) if x else window
+        x_min = max(0, x_max - window)
+
+        # Melt temp graph
+        self.line_melt.set_data(x, temp_list)
+        self.ax_melt.set_xlim(x_min, x_min + window)
+        self.ax_melt.set_ylim(0, 1850)
+        self.ax_melt.relim()
+        self.ax_melt.autoscale_view()
+        # RTD graph
+        self.line_rtd.set_data(x, rtd_list)
+        self.ax_rtd.set_xlim(x_min, x_min + window)
+        self.ax_rtd.set_ylim(0, 600)
+        self.ax_rtd.relim()
+        self.ax_rtd.autoscale_view()
+        self.canvas.draw_idle()
 
     def _open_port(self):
         """Open selected port in background thread (non-blocking)."""
@@ -1878,15 +1897,17 @@ class DashboardFrame(tk.Frame):
         # -------- DEVICE TEMPERATURE --------
         device_temp = getattr(data, "temperature", None)
         if device_temp is not None:
-           self.controller.current_temp.set(f"{device_temp:.1f}")
+            self.controller.current_temp.set(f"{device_temp:.1f}")
         else:
-          self.controller.current_temp.set("--")
-    # -------- RTD TEMPERATURE --------
+            self.controller.current_temp.set("--")
+        # -------- RTD TEMPERATURE --------
         rtd_temp = getattr(data, "rtd_temperature", None)
         if rtd_temp is not None:
-          self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
+            self.controller.rtd_temp.set(f"{rtd_temp:.1f}")
+            # Append RTD value for graph
+            self.controller.rtd_data.append(float(rtd_temp))
         else:
-          self.controller.rtd_temp.set("--")
+            self.controller.rtd_temp.set("--")
 
         # --- log to database and update history/graph ---
         # Use melt temperature (thermocouple) for graph instead of device temperature
