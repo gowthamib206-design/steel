@@ -21,11 +21,12 @@ RAW_BYTE_COLS = {f"b{i}" for i in range(16)}
 
 # Named fields and their display order
 DECODED_FIELDS = [
-    "Timestamp",
-    "Device ID",
+    "Temperature (°C)",
     "RSSI (dBm)",
-    "RTD Temp (°C)",
-    "Melt Temp (°C)",
+    "Device ID",
+    "RTD Resistance (Ω)",
+    "Thermocouple (°C)",
+    "Battery (V)",
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -201,7 +202,7 @@ def _thermocouple_temperature(thermo_raw: int, rtd_temperature: int) -> float:
     return _uV_to_temp(thermo_uV + rtd_uV)
 
 
-def _decode_packet_row(row, columns, timestamp=None):
+def _decode_packet_row(row, columns):
     """
     Given a DB row and its column list, return a decoded dict if the row
     contains b0..b15 byte columns, otherwise return None.
@@ -217,6 +218,13 @@ def _decode_packet_row(row, columns, timestamp=None):
         v = row[idx[f"b{n}"]]
         return int(v) if v is not None else 0
 
+    # Temperature: bytes 0-3
+    temp = b(3)
+    temp = (temp << 8) | b(2)
+    temp = (temp << 8) | b(1)
+    temp = (temp << 8) | b(0)
+    temperature = temp / 10000.0
+
     # RSSI: byte 4, subtract 128
     rssi = b(4) - 128
 
@@ -229,18 +237,22 @@ def _decode_packet_row(row, columns, timestamp=None):
     rtd_resistance = (rtd * 400) / (2 ** 15)
     rtd_temperature = _rtd_resistance_to_temperature(rtd_resistance)
 
-    # Thermocouple (Melt Temp): bytes 12-13, no RTD compensation
+    # Thermocouple: bytes 12-13, no RTD compensation
     thermo_raw = b(13)
     thermo_raw = (thermo_raw << 8) | b(12)
     thermo_uV  = _raw_to_uV(thermo_raw)
     thermo_temp = _uV_to_temp(thermo_uV)
 
+    # Battery: bytes 14-15
+    battery = ((b(15) << 8) | b(14)) / 1000.0
+
     return {
-        "Timestamp":      timestamp or "",
-        "Device ID":      device_id,
-        "RSSI (dBm)":     str(rssi),
-        "RTD Temp (°C)":  str(rtd_temperature),
-        "Melt Temp (°C)": f"{thermo_temp:.1f}",
+        "Temperature (°C)":     f"{temperature:.4f}",
+        "RSSI (dBm)":           str(rssi),
+        "Device ID":            device_id,
+        "RTD Resistance (Ω)":   f"{rtd_resistance:.4f}",
+        "Thermocouple (°C)":    f"{thermo_temp:.1f}",
+        "Battery (V)":          f"{battery:.3f}",
     }
 
 
@@ -312,6 +324,7 @@ class DateTimePopup(tk.Toplevel):
         self.deiconify()
 
     def _build_calendar(self):
+  
         for w in self.cal_frame.winfo_children():
             w.destroy()
         self.title_lbl.config(
@@ -615,8 +628,10 @@ class DBDateViewer(tk.Tk):
 
     def _setup_columns(self):
         if self._is_packet_table:
-            # Only show the 5 decoded fields — no raw byte columns
-            display_cols = DECODED_FIELDS
+            # Build display columns: non-byte columns first, then decoded sensor fields
+            non_byte = [c for c in self._columns
+                        if c.lower() not in RAW_BYTE_COLS]
+            display_cols = non_byte + DECODED_FIELDS
         else:
             display_cols = self._columns
 
@@ -625,8 +640,8 @@ class DBDateViewer(tk.Tk):
         for col in display_cols:
             self._tree.heading(col, text=col,
                                command=lambda c=col: self._sort(c, False))
-            w = max(120, min(220, len(col) * 11 + 20))
-            self._tree.column(col, width=w, anchor=tk.W, minwidth=80)
+            w = max(100, min(220, len(col) * 11 + 20))
+            self._tree.column(col, width=w, anchor=tk.W, minwidth=60)
 
     # ── Load with date filter ─────────────────────────────────
 
@@ -693,25 +708,32 @@ class DBDateViewer(tk.Tk):
     def _populate(self, rows):
         self._tree.delete(*self._tree.get_children())
 
-        # Pre-compute timestamp column index once
-        ts_idx = None
-        if self._is_packet_table and self._timestamp_col:
-            ts_idx = self._columns.index(self._timestamp_col)
+        # Pre-compute non-byte column info once (not per row)
+        if self._is_packet_table:
+            non_byte_cols = [c for c in self._columns if c.lower() not in RAW_BYTE_COLS]
+            col_idx = {c.lower(): j for j, c in enumerate(self._columns)}
 
         for i, row in enumerate(rows):
             tag = "odd" if i % 2 else "even"
 
             if self._is_packet_table:
-                timestamp = str(row[ts_idx]) if ts_idx is not None else ""
-                decoded = _decode_packet_row(row, self._columns, timestamp)
+                display = []
+                for col in non_byte_cols:
+                    v = row[col_idx[col.lower()]]
+                    display.append("" if v is None else v)
+
+                decoded = _decode_packet_row(row, self._columns)
                 if decoded:
-                    display = [decoded.get(field, "") for field in DECODED_FIELDS]
+                    for field in DECODED_FIELDS:
+                        display.append(decoded.get(field, ""))
                 else:
-                    display = [""] * len(DECODED_FIELDS)
+                    display.extend([""] * len(DECODED_FIELDS))
             else:
                 display = ["" if v is None else v for v in row]
 
             self._tree.insert("", tk.END, values=tuple(display), tags=(tag,))
+
+        self._row_label.config(text=f"Showing {len(rows)} row(s)")
 
         self._row_label.config(text=f"Showing {len(rows)} row(s)")
 
@@ -728,17 +750,7 @@ class DBDateViewer(tk.Tk):
                 return (1, v.lower())
 
         if self._is_packet_table and col in DECODED_FIELDS:
-            if col == "Timestamp":
-                # Sort by raw timestamp from DB
-                if self._timestamp_col and self._timestamp_col in self._columns:
-                    ts_idx = self._columns.index(self._timestamp_col)
-                    self._all_rows = sorted(
-                        self._all_rows,
-                        key=lambda r: str(r[ts_idx]) if r[ts_idx] else "",
-                        reverse=desc
-                    )
-            else:
-                # Sort on decoded value
+            try:
                 self._all_rows = sorted(
                     self._all_rows,
                     key=lambda r: _sort_key(
@@ -746,13 +758,18 @@ class DBDateViewer(tk.Tk):
                     ),
                     reverse=desc
                 )
+            except Exception:
+                pass
         elif col in self._columns:
             idx = self._columns.index(col)
-            self._all_rows = sorted(
-                self._all_rows,
-                key=lambda r: _sort_key(r[idx]),
-                reverse=desc
-            )
+            try:
+                self._all_rows = sorted(
+                    self._all_rows,
+                    key=lambda r: _sort_key(r[idx]),
+                    reverse=desc
+                )
+            except Exception:
+                pass
 
         self._load_with_filter()
         self._tree.heading(col, command=lambda c=col: self._sort(c, not desc))

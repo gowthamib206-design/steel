@@ -1,9 +1,8 @@
 """
 Serial Port Raw Byte Logger
-- Reads bytes from serial port using the same framing as wireless_sensor.py
-- Frame: \r = start, \n = end, \b = escape next byte
-- Extracts 16-byte payload packets and stores them in SQLite (serial_packets.db)
-- Prints each 16-byte row to console
+- Uses the same framing protocol as wireless_sensor.py PacketProcessor
+- Frame: 0x0D (\r) = start, 0x0A (\n) = end, 0x08 (\b) = escape next byte
+- Extracts 16 payload bytes per packet, prints to console and saves to SQLite
 """
 
 import serial
@@ -16,9 +15,10 @@ BAUDRATE    = 115200
 DB_FILE     = "serial_packets.db"
 PACKET_SIZE = 16
 
-FRAME_START  = 0x0D   # \r3
-FRAME_END    = 0x0A   # \n
-ESCAPE_BYTE  = 0x08   # \b
+# Same framing constants as wireless_sensor.py PacketProcessor
+FRAME_START = 0x0D   # \r
+FRAME_END   = 0x0A   # \n
+ESCAPE_BYTE = 0x08   # \b
 
 
 def init_db():
@@ -38,15 +38,12 @@ def init_db():
 
 
 def save(conn, packet):
-    try:
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        conn.execute(
-            "INSERT INTO packets VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (ts, *packet)
-        )
-        conn.commit()
-    except sqlite3.OperationalError:
-        pass
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    conn.execute(
+        "INSERT INTO packets VALUES (NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (ts, *packet)
+    )
+    conn.commit()
 
 
 def run():
@@ -69,9 +66,9 @@ def run():
 
     print(f"Reading from {PORT} — press Ctrl+C to stop.\n")
 
-    packet  = []
-    escape  = False
-    count   = 0
+    packet = []
+    escape = False
+    count  = 0
 
     try:
         while True:
@@ -83,30 +80,20 @@ def run():
 
             if not escape:
                 if byte_val == ESCAPE_BYTE:
-                    # next byte is escaped — include it as-is
                     escape = True
                     continue
-
                 if byte_val == FRAME_START:
-                    # start of new frame — reset buffer
                     packet = []
                     continue
-
                 if byte_val == FRAME_END:
-                    # end of frame — save if complete
                     if len(packet) == PACKET_SIZE:
                         count += 1
                         print(f"[{count:04d}] " + " ".join(f"{b:02X}" for b in packet))
                         save(conn, packet)
-                    else:
-                        print(f"[SKIP] incomplete packet: {len(packet)} bytes")
                     packet = []
                     continue
-
                 packet.append(byte_val)
-
             else:
-                # escaped byte — append as-is
                 packet.append(byte_val)
                 escape = False
 
@@ -122,4 +109,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
