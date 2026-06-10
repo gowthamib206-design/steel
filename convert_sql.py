@@ -8,6 +8,7 @@ SQLite DB Viewer with Date Range Filter
 import sqlite3
 import csv
 import calendar
+import sys
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
@@ -21,12 +22,15 @@ RAW_BYTE_COLS = {f"b{i}" for i in range(16)}
 
 # Named fields and their display order
 DECODED_FIELDS = [
-    "Temperature (°C)",
+    "OXY ADC",
+    "OXY (mV)",
     "RSSI (dBm)",
-    "Device ID",
-    "RTD Resistance (Ω)",
-    "Thermocouple (°C)",
-    "Battery (V)",
+    "Packet Type",
+    "TX ID",
+    "TC ADC",
+    "TC (mV)",
+    "Melt Temp (°C)",
+    "Seq No",
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -204,9 +208,13 @@ def _thermocouple_temperature(thermo_raw: int, rtd_temperature: int) -> float:
 
 def _decode_packet_row(row, columns):
     """
-    Given a DB row and its column list, return a decoded dict if the row
-    contains b0..b15 byte columns, otherwise return None.
-    Uses the exact same byte parsing as wireless_sensor.py SensorDataParser.parse_packet().
+    Packet layout:
+      0-3:   OXY ADC    (4 bytes, little-endian)
+      4:     RSSI
+      5:     Packet type
+      6-9:   TX ID address
+      10-13: TC ADC     (thermocouple, 4 bytes, little-endian)
+      14-15: Packet sequence number
     """
     col_lower = [c.lower() for c in columns]
     if not all(f"b{i}" in col_lower for i in range(16)):
@@ -218,41 +226,38 @@ def _decode_packet_row(row, columns):
         v = row[idx[f"b{n}"]]
         return int(v) if v is not None else 0
 
-    # Temperature: bytes 0-3
-    temp = b(3)
-    temp = (temp << 8) | b(2)
-    temp = (temp << 8) | b(1)
-    temp = (temp << 8) | b(0)
-    temperature = temp / 10000.0
+    # OXY ADC: bytes 0-3 little-endian → mV = (oxy_raw / 2^23) * (2500/8)
+    oxy_raw = b(0) | (b(1) << 8) | (b(2) << 16) | (b(3) << 24)
+    oxy_mV  = (oxy_raw / (2**23)) * (2500 / 8)
+    rtd_temperature = oxy_mV  # display mV as the RTD value
 
     # RSSI: byte 4, subtract 128
     rssi = b(4) - 128
 
-    # Device ID: bytes 6-9
-    device_id = f"{b(6):02x} {b(7):02x} {b(8):02x} {b(9):02x}"
+    # Packet type: byte 5
+    pkt_type = b(5)
 
-    # RTD: bytes 10-11
-    rtd = b(11)
-    rtd = (rtd << 8) | b(10)
-    rtd_resistance = (rtd * 400) / (2 ** 15)
-    rtd_temperature = _rtd_resistance_to_temperature(rtd_resistance)
+    # TX ID: bytes 6-9
+    tx_id = f"{b(6):02x} {b(7):02x} {b(8):02x} {b(9):02x}"
 
-    # Thermocouple: bytes 12-13, no RTD compensation
-    thermo_raw = b(13)
-    thermo_raw = (thermo_raw << 8) | b(12)
-    thermo_uV  = _raw_to_uV(thermo_raw)
-    thermo_temp = _uV_to_temp(thermo_uV)
+    # TC ADC: bytes 10-13 little-endian → mV = (tc_raw / 2^23) * (2500/128)
+    tc_raw = b(10) | (b(11) << 8) | (b(12) << 16) | (b(13) << 24)
+    tc_mV  = (tc_raw / (2**23)) * (2500 / 128)
+    thermo_temp = tc_mV
 
-    # Battery: bytes 14-15
-    battery = ((b(15) << 8) | b(14)) / 1000.0
+    # Packet sequence: bytes 14-15 little-endian
+    seq = b(14) | (b(15) << 8)
 
     return {
-        "Temperature (°C)":     f"{temperature:.4f}",
+        "OXY ADC":              str(oxy_raw),
+        "OXY (mV)":             f"{oxy_mV:.4f}",
         "RSSI (dBm)":           str(rssi),
-        "Device ID":            device_id,
-        "RTD Resistance (Ω)":   f"{rtd_resistance:.4f}",
-        "Thermocouple (°C)":    f"{thermo_temp:.1f}",
-        "Battery (V)":          f"{battery:.3f}",
+        "Packet Type":          str(pkt_type),
+        "TX ID":                tx_id,
+        "TC ADC":               str(tc_raw),
+        "TC (mV)":              f"{tc_mV:.4f}",
+        "Melt Temp (°C)":       f"{thermo_temp:.4f}",
+        "Seq No":               str(seq),
     }
 
 
@@ -539,6 +544,32 @@ class DBDateViewer(tk.Tk):
 
     # ── File selection ────────────────────────────────────────
 
+    def _load_from_path(self, path):
+        """Load a DB file directly by path (used when path passed via argv)."""
+        if self._conn:
+            self._conn.close()
+            self._conn = None
+        try:
+            self._conn = sqlite3.connect(path)
+            name = path.replace("\\", "/").split("/")[-1]
+            self._file_label.config(text=f"📄 {name}", fg="#0066cc")
+            self._status.config(text=f"Opened: {path}")
+            tables = [
+                r[0] for r in self._conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' ORDER BY name"
+                ).fetchall()
+                if r[0] != "sqlite_sequence"
+            ]
+            if not tables:
+                messagebox.showinfo("Empty", "No tables found.")
+                return
+            self._table_combo["values"] = tables
+            self._table_combo.current(0)
+            self._load_table()
+        except sqlite3.DatabaseError as e:
+            messagebox.showerror("Error", f"Cannot open file:\n{e}")
+
     def _select_file(self):
         path = filedialog.askopenfilename(
             title="Open SQLite Database File",
@@ -808,4 +839,7 @@ class DBDateViewer(tk.Tk):
 
 if __name__ == "__main__":
     app = DBDateViewer()
+    # If a db path was passed as argument, load it immediately
+    if len(sys.argv) == 2:
+        app.after(100, lambda: app._load_from_path(sys.argv[1]))
     app.mainloop()
